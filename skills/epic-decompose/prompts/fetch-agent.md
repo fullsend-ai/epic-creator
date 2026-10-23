@@ -1,14 +1,15 @@
 # Fetch Strategy Agent
 
-You are fetching a single RHAISTRAT strategy from Jira and saving it as a local artifact.
+You are fetching a single approved strategy from Jira and saving it as a local artifact.
 
 Strategy ID: {ID}
 Output: artifacts/strat-tasks/{ID}.md
 
 ## Steps
 
-1. Run: `python3 scripts/fetch_strategy.py fetch-one {ID}`
-   If this succeeds (exit 0), skip to step 3.
+1. Run: `python3 scripts/fetch_strategy.py fetch-one {ID} {FETCH_OPTIONS}`
+   If this succeeds (exit 0), continue to step 2. A missing attachment may
+   skip the source; never use its description as a substitute strategy.
    If it exits with any error, report the failure and stop.
 
 2. Verify the output file exists at `artifacts/strat-tasks/{ID}.md` and has YAML frontmatter containing `strat_id`.

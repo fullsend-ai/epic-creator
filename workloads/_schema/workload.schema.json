@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Epic Creator intake workload, version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "version",
+    "source"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "issue_type",
+        "id_pattern",
+        "attachment_template",
+        "description_fallback",
+        "ready_labels",
+        "skip_policy",
+        "processed_label",
+        "handoff_type",
+        "identity_fields"
+      ],
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "issue_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id_pattern": {
+          "type": "string",
+          "minLength": 3
+        },
+        "attachment_template": {
+          "const": "{key}-strategy.md"
+        },
+        "description_fallback": {
+          "type": "boolean"
+        },
+        "ready_labels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "skip_policy": {
+          "enum": [
+            "child-epics",
+            "processed-label"
+          ]
+        },
+        "processed_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "handoff_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "strat_id",
+              "jira_key",
+              "source_initiative"
+            ]
+          }
+        }
+      }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "issue_type", "parent", "dependency_link_type", "labels"],
+      "properties": {
+        "project": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "issue_type": {"type": "string", "minLength": 1},
+        "dependency_link_type": {"type": "string", "minLength": 1},
+        "parent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relation"],
+          "properties": {
+            "relation": {"enum": ["parent", "link"]},
+            "link_type": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"relation": {"const": "link"}}},
+          "then": {"required": ["link_type"]},
+          "else": {"not": {"required": ["link_type"]}}
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["created", "investigation", "implementation_prefix", "ai_prefix", "needs_component"],
+          "properties": {
+            "created": {"$ref": "#/$defs/label"},
+            "investigation": {"$ref": "#/$defs/label"},
+            "implementation_prefix": {"$ref": "#/$defs/label"},
+            "ai_prefix": {"$ref": "#/$defs/label"},
+            "needs_component": {"$ref": "#/$defs/label"}
+          }
+        }
+      }
+    },
+    "planning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decompose",
+        "review",
+        "revise",
+        "components",
+        "review_gate",
+        "scoring",
+        "artifact_template"
+      ],
+      "properties": {
+        "decompose": {
+          "type": "string",
+          "pattern": "^workloads/policies/[A-Za-z0-9_./-]+\\.md$"
+        },
+        "review": {
+          "type": "string",
+          "pattern": "^workloads/policies/[A-Za-z0-9_./-]+\\.md$"
+        },
+        "revise": {
+          "type": "string",
+          "pattern": "^workloads/policies/[A-Za-z0-9_./-]+\\.md$"
+        },
+        "components": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "file"
+          ],
+          "properties": {
+            "project": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "file": {
+              "type": "string",
+              "pattern": "^\\.context/[a-zA-Z0-9_-]+\\.txt$"
+            }
+          }
+        },
+        "review_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "criteria",
+            "points_per_criterion",
+            "pass_score",
+            "zero_fails"
+          ],
+          "properties": {
+            "criteria": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "points_per_criterion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "pass_score": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "zero_fails": {
+              "type": "boolean"
+            }
+          }
+        },
+        "scoring": {
+          "type": "string",
+          "pattern": "^workloads/policies/[A-Za-z0-9_./-]+\\.yaml$"
+        },
+        "artifact_template": {
+          "type": "string",
+          "pattern": "^workloads/policies/[A-Za-z0-9_./-]+\\.md$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$", "maxLength": 120}
+  }
+}

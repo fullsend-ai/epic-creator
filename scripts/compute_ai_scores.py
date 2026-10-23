@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter, update_frontmatter
+from workload import get_workload
 
 SIGNAL_FIELDS = [
     "change_specificity",
@@ -47,16 +48,17 @@ INVESTIGATION_SIGNAL_FIELDS = [
 ]
 
 
-def classify(score):
-    if score >= 3:
+def classify(score, planning=None):
+    planning = planning or get_workload("rhaistrat-strategy").planning
+    if score >= planning.implementation_high:
         return "High"
-    elif score >= 0:
+    elif score >= planning.implementation_medium:
         return "Medium"
     else:
         return "Low"
 
 
-def classify_investigation(signals):
+def classify_investigation(signals, planning=None):
     """Routing classification for Investigation epics.
 
     Returns (score, classification). The class is a routing decision
@@ -71,6 +73,7 @@ def classify_investigation(signals):
       - High gate: only when nothing must be handed to a cluster or a human
         (both blockers == 0); any blocker caps the routing at Medium.
     """
+    planning = planning or get_workload("rhaistrat-strategy").planning
     s = {f: (signals.get(f) or 0) for f in INVESTIGATION_SIGNAL_FIELDS}
     total = sum(s.values())
     spec = s["question_specificity"]
@@ -79,14 +82,14 @@ def classify_investigation(signals):
     cluster = s["cluster_hardware_dependence"]
     human = s["human_judgment_required"]
 
-    if spec < 0 or (src <= 0 and run <= 0) or total <= -1:
+    if spec < 0 or (src <= 0 and run <= 0) or total <= planning.investigation_low:
         return total, "Low"
-    if total >= 2 and cluster == 0 and human == 0:
+    if total >= planning.investigation_high and cluster == 0 and human == 0:
         return total, "High"
     return total, "Medium"
 
 
-def compute_for_epic(epic_path):
+def compute_for_epic(epic_path, planning=None):
     """Compute and write score for a single epic file.
 
     Returns (epic_id, score, classification) on success, or None if
@@ -104,7 +107,7 @@ def compute_for_epic(epic_path):
         inv = data.get("investigation_signals")
         if not isinstance(inv, dict):
             return None
-        total, classification = classify_investigation(inv)
+        total, classification = classify_investigation(inv, planning)
     else:
         signals = data.get("ai_signals")
         if not signals or not isinstance(signals, dict):
@@ -117,7 +120,7 @@ def compute_for_epic(epic_path):
                 val = 0
             total += val
 
-        classification = classify(total)
+        classification = classify(total, planning)
 
     epic_id = data.get("epic_id", os.path.basename(epic_path))
 
@@ -136,7 +139,7 @@ def compute_for_epic(epic_path):
     return epic_id, total, classification, changed
 
 
-def compute_for_strategy(strat_id):
+def compute_for_strategy(strat_id, planning=None):
     """Compute scores for all epics of a strategy. Returns count of epics processed."""
     # Two explicit patterns: conditional decompositions name their epics
     # {strat_id}-BRANCH-<X>-E00N.md, which {strat_id}-E*.md cannot match — the
@@ -153,7 +156,7 @@ def compute_for_strategy(strat_id):
 
     count = 0
     for path in epic_files:
-        result = compute_for_epic(path)
+        result = compute_for_epic(path, planning)
         if result:
             epic_id, score, classification, changed = result
             print(f"  {epic_id}: {score} ({classification}){changed}",

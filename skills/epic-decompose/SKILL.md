@@ -1,6 +1,6 @@
 ---
 name: epic-decompose
-description: Decompose batches of RHAISTRAT strategies into implementation epic DAGs. Accepts explicit IDs or a JQL query. Non-interactive.
+description: Decompose approved strategies into implementation epic DAGs using a registered workload. Accepts explicit IDs or a JQL query. Non-interactive.
 user-invocable: true
 allowed-tools: Glob, Bash, Agent
 ---
@@ -17,21 +17,26 @@ In particular, after you launch a wave's Agent(s), do **not** write narration su
 
 Parse `$ARGUMENTS` for:
 - `--jql "<query>"`, `--limit N`, `--batch-size N` (default 25), `--data-dir "<path>"`
-- `--headless`, `--announce-complete`, `--reprocess`, `--skip-if-has-epics`
-- Remaining arguments: explicit RHAISTRAT IDs
+- `--headless`, `--announce-complete`, `--reprocess`, `--skip-if-has-epics` (alias `--skip-if-processed`)
+- `--workload <registered-id>` (optional; no flag retains legacy RHAISTRAT compatibility)
+- Remaining arguments: explicit source issue IDs matching the selected descriptor
 
 ### 1. Init
 
 ```bash
-python3 scripts/pipeline_state.py init [--batch-size N] [--headless] [--announce-complete]
+python3 scripts/pipeline_state.py init [--batch-size N] [--headless] [--announce-complete] [--workload ID]
 ```
+
+On resuming an unfinished run, call `pipeline_state.py status` first and resume
+the existing dispatch loop instead of running `init` again. State loading rejects
+a changed descriptor or policy. Never use generic `set` to switch workload bindings.
 
 ### 2. IDs
 
 **JQL mode** (`--jql`):
 
 ```bash
-python3 scripts/fetch_strategy.py fetch "<query>" --ids-file tmp/pipeline-all-ids.txt [--limit N] [--data-dir "<path>"] [--skip-if-has-epics]
+python3 scripts/fetch_strategy.py fetch "<query>" --ids-file tmp/pipeline-all-ids.txt [--limit N] [--data-dir "<path>"] [--skip-if-processed] [--workload ID]
 ```
 
 Print `[DECOMPOSE] JQL: <jql>` from stderr output.
@@ -48,7 +53,7 @@ If no IDs and no JQL, stop with usage instructions.
 
 ```bash
 bash scripts/fetch-architecture-context.sh
-python3 scripts/fetch_components.py
+python3 scripts/fetch_components.py [--workload ID]
 ```
 
 Retry each once on failure. If retry fails, stop: "bootstrap failed."
@@ -92,6 +97,10 @@ Parse the YAML output for: `action`, `phase`, `message`, `agents`.
 **launch_wave**: For each agent in the `agents` list:
 - Build prompt: `"<vars>\n\nRead <prompt_file> and follow all instructions exactly."`
 - `vars` are pre-rendered KEY=VALUE lines with `{ID}` already substituted.
+- They also provide the bound workload, stage policy, component file and review
+  thresholds. Read the selected `POLICY_FILE`; never choose policies by key prefix.
+- Generated frontmatter uses `frontmatter.py set --source artifacts/strat-tasks/{ID}.md`
+  to inherit provenance. Completed stage artifacts are checked before advancing.
 - Launch as background Agent (with `subagent_type` if present).
 
 Immediately wait for completion. **Do not end your turn or emit any text after launching — your next tool call MUST be `wait-for-wave`:**

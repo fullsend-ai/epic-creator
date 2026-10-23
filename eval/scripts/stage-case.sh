@@ -24,13 +24,17 @@ log() { echo "[stage-case] ${CASE_ID:-?}: $*" >&2; }
 cd "$WS" || { log "FATAL: cannot cd $WS"; exit 1; }
 
 # --- 1. De-symlink the project tree (~372KB per case) ------------------------
-for name in scripts skills CLAUDE.md; do
+for name in scripts skills workloads CLAUDE.md; do
   if [ -L "$name" ]; then
     rm -f "$name"
     if [ -e "$ROOT/$name" ]; then
       cp -R "$ROOT/$name" "$name"
       log "copied $name"
     fi
+  fi
+  if [ "$name" = workloads ] && [ ! -e "$name" ] && [ -d "$ROOT/$name" ]; then
+    cp -R "$ROOT/$name" "$name"
+    log "copied workload registry and policies"
   fi
 done
 

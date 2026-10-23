@@ -1,0 +1,17 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "implementation", "investigation"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "implementation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["high_min", "medium_min"],
+      "properties": {"high_min": {"type": "integer"}, "medium_min": {"type": "integer"}}
+    },
+    "investigation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["high_min", "low_max"],
+      "properties": {"high_min": {"type": "integer"}, "low_max": {"type": "integer"}}
+    }
+  }
+}

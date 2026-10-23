@@ -1,0 +1,9 @@
+schema_version: 1
+implementation:
+  high_min: 3
+  medium_min: 0
+investigation:
+  high_min: 2
+  low_max: -1
+  # The shared investigation routing model also checks specificity,
+  # reachable evidence, cluster dependence and human judgment.
