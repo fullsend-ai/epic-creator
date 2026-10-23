@@ -147,12 +147,33 @@ def _search_issues(server, user, token, jql, limit=100):
     return all_issues
 
 
+def _issue_type_name(issue):
+    """Read the issue type from either a linked issue or a full issue response."""
+    fields = issue.get("fields") or {}
+    issue_type = fields.get("issuetype") or {}
+    return issue_type.get("name")
+
+
 def _has_existing_epics(issue, server, user, token):
-    """Check if a strategy already has child epics or Incorporates links."""
+    """Check for child epics or outgoing Incorporates links to actual epics."""
     # Legacy check for pre-parent-field epics that used Incorporates links
     for link in issue.get("fields", {}).get("issuelinks", []):
-        link_type = link.get("type", {}).get("name", "")
-        if link_type == "Incorporates" and "outwardIssue" in link:
+        if link.get("type", {}).get("name") != "Incorporates":
+            continue
+        linked_issue = link.get("outwardIssue")
+        if not linked_issue:
+            continue
+
+        linked_key = linked_issue["key"]
+        issue_type = _issue_type_name(linked_issue)
+        if not issue_type:
+            full_issue = get_issue(server, user, token, linked_key,
+                                   fields=["issuetype"])
+            issue_type = _issue_type_name(full_issue)
+        if not issue_type:
+            raise ValueError(f"Cannot determine issue type for {linked_key} "
+                             f"incorporated by {issue['key']}")
+        if issue_type == "Epic":
             return True
     key = issue["key"]
     jql = f"parent = {key} AND issuetype = Epic"
