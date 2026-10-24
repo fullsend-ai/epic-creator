@@ -3,10 +3,10 @@
 version: "1"
 runtime: claude
 roles:
-    - fullsend
     - triage
     - coder
     - review
+    - fix
     - retro
     - prioritize
 agents:
@@ -37,12 +37,9 @@ agents:
     - source: epic-creator/epic-creator.yaml
 create_issues:
     allow_targets:
-        repos:
-            - fullsend-ai/fullsend
+        orgs:
+            - fullsend-ai
 status_notifications:
     reaction:
         start: enabled
         completion: enabled
-
-allowed_remote_resources:
-  - https://raw.githubusercontent.com/fullsend-ai/agents/
