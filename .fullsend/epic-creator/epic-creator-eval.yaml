@@ -1,0 +1,35 @@
+---
+# Eval variant of epic-creator.yaml: same prompt, scripts, image, policy, gates
+# (the validation loop's DONE gate, pre-script, post-script), but no production
+# Jira credential and with the models under evaluation injected from outside.
+# fullsend composes this file over its base (internal/harness/compose.go):
+# non-empty scalars override, env.sandbox / env.runner merge with these keys
+# winning, and the child provider replaces the base entry with the same name.
+# The production Jira profile is inherited unchanged, including enforced
+# read-only access, so persistent gateways never need to replace its content.
+#
+# `model` is not set: `fullsend run --model` passes the model under evaluation.
+# tests/test_fullsend_eval_harness.py pins this file to the keys below.
+#
+# fullsend resolves `base` relative to this file's directory, unlike the
+# fullsend-dir-relative paths below (epic-creator/epic-creator.yaml would look for
+# .fullsend/epic-creator/epic-creator/epic-creator.yaml).
+base: epic-creator.yaml
+
+env:
+  sandbox:
+    # Literals: the base reads ${JIRA_SERVER}/${JIRA_USER}, which would
+    # otherwise be required on the host.
+    JIRA_SERVER: "https://redhat.atlassian.net"
+    JIRA_USER: "eval"
+    # Exported by the eval runner; the base pins a literal.
+    CLAUDE_CODE_SUBAGENT_MODEL: "${AGENT_EVAL_SUBAGENT_MODEL}"
+  runner:
+    # Literals, so a host without Jira credentials passes env validation.
+    JIRA_SERVER: "https://redhat.atlassian.net"
+    JIRA_USER: "eval"
+    JIRA_TOKEN: "eval-no-jira"
+
+providers:
+  # Replaces the production provider (name: jira) with a literal credential.
+  - epic-creator/jira-provider-eval.yaml

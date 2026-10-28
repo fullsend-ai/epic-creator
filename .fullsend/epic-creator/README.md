@@ -60,3 +60,30 @@ is useful for debugging.
 Jira access from the sandbox is read-only; local runs produce artifacts for
 review. Submission currently uses the standalone `scripts/submit.py` script
 rather than a skill and can be run separately.
+
+## Eval variant
+
+`epic-creator-eval.yaml` (agent `epic-creator-eval`) runs the same package for the
+epic-creator eval: it sets `base: epic-creator.yaml` (fullsend resolves `base` relative to the
+child file) and inherits the prompt, scripts, image, policy, validation loop (DONE gate),
+pre-script and post-script. It overrides only:
+
+- `env.sandbox`: `JIRA_SERVER`/`JIRA_USER` as literals, and
+  `CLAUDE_CODE_SUBAGENT_MODEL` from `${AGENT_EVAL_SUBAGENT_MODEL}`;
+- `env.runner`: the three `JIRA_*` keys as literals (`JIRA_TOKEN: "eval-no-jira"`), so the
+  host needs no Jira credentials;
+- the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential). The
+  production Jira profile is inherited unchanged, including enforced read-only access.
+
+The model comes from `fullsend run --model`. `tests/test_fullsend_eval_harness.py` pins the
+child to exactly these overrides. Run it locally, with no `JIRA_*` variables on the host, from
+a copy of the checkout holding the pre-provisioned strategy under
+`artifacts/strat-tasks/` and its matching `.context/`:
+
+```bash
+fullsend run epic-creator-eval --fullsend-dir .fullsend --target-repo . --model claude-opus-4-6 --env-file .env
+```
+
+where `.env` holds the four Vertex variables above plus
+`FULLSEND_TASK="/epic-decompose RHAISTRAT-1234 --headless"` and
+`AGENT_EVAL_SUBAGENT_MODEL=claude-opus-4-6`.
