@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Submit decomposed epics to Jira RHAI project.
+"""Submit decomposed epics to Jira.
 
-Reads epic artifacts from artifacts/epic-tasks/, creates Epic issues in
-the RHAI project, sets Blocks links for dependencies, and labels the
-source RHAISTRAT.
+With --workload, validate typed artifacts and use the descriptor's destination
+and relationship policy. Keep the submission journal across retries; an unknown
+create outcome stops until the existing issue can be recovered.
 
-Designed for idempotent re-runs: each epic's Jira key is written to
-frontmatter immediately after creation. On re-run, epics with an
-existing jira_key are skipped. If a creation fails mid-batch, re-run
-picks up where it left off.
+Without --workload, retain legacy untyped RHAISTRAT submission to RHAI Epics,
+Blocks dependency links, and frontmatter-key recovery.
 
 Usage:
+    python scripts/submit.py --workload ID [--dry-run] SOURCE-ID ...
     python scripts/submit.py [--dry-run] [--artifacts-dir DIR] RHAISTRAT-ID ...
     python scripts/submit.py [--dry-run] --all
 
@@ -74,7 +73,7 @@ DEPENDENCY_LINK_TYPE = "Blocks"
 COMPONENTS_PATH = os.path.join(".context", "rhai-components.txt")
 
 
-def _load_valid_components():
+def _load_valid_components(path=None):
     """Load the canonical RHAI component list from disk.
 
     Returns a set of valid component names, or None if the file
@@ -82,12 +81,13 @@ def _load_valid_components():
     validation is unavailable (component passthrough), whereas an
     empty set would mean no valid components exist.
     """
-    if not os.path.exists(COMPONENTS_PATH):
-        print(f"  WARNING: {COMPONENTS_PATH} not found — "
+    path = COMPONENTS_PATH if path is None else path
+    if not os.path.exists(path):
+        print(f"  WARNING: {path} not found — "
               f"run scripts/fetch_components.py to populate",
               file=sys.stderr)
         return None
-    with open(COMPONENTS_PATH) as f:
+    with open(path) as f:
         return {line.strip() for line in f if line.strip()}
 
 
@@ -192,11 +192,15 @@ def _find_submittable_strats(artifacts_dir):
     return strat_ids
 
 
-def _build_plan(epics, valid_components):
+def _build_plan(epics, valid_components, submission=None):
     """Build submission plan from epic artifacts.
 
     Returns list of plan entries with all fields needed for submission.
     """
+    label_policy = submission.labels if submission else {
+        "created": "epic-creator-auto-created", "investigation": "epic-creator-investigation",
+        "implementation_prefix": "epic-creator-impl-", "ai_prefix": "epic-creator-ai-impl-",
+        "needs_component": "epic-creator-needs-component"}
     plan = []
     for path, data, body in epics:
         epic_id = data["epic_id"]
@@ -214,21 +218,21 @@ def _build_plan(epics, valid_components):
         epic_type = data.get("type", "Implementation")
         jira_key = data.get("jira_key")
 
-        # Labels — all prefixed with epic-creator- for namespace clarity
-        labels = ["epic-creator-auto-created"]
+        # Labels come from the selected policy, or the legacy namespace.
+        labels = [label_policy["created"]]
         if epic_type == "Investigation":
-            labels.append("epic-creator-investigation")
+            labels.append(label_policy["investigation"])
         impl_type = data.get("implementation_type")
         if impl_type:
-            labels.append(f"epic-creator-impl-{impl_type}")
+            labels.append(f"{label_policy['implementation_prefix']}{impl_type}")
         ai_impl = data.get("ai_implementability")
         if ai_impl:
             labels.append(
-                f"epic-creator-ai-impl-{ai_impl.lower()}")
+                f"{label_policy['ai_prefix']}{ai_impl.lower()}")
         if valid_components is not None and not component:
-            labels.append("epic-creator-needs-component")
+            labels.append(label_policy["needs_component"])
             print(f"  WARNING: {epic_id} component "
-                  f"{raw_component!r} not in RHAI component list",
+                  f"{raw_component!r} not in {submission.project if submission else 'RHAI'} component list",
                   file=sys.stderr)
 
         plan.append({
@@ -625,18 +629,23 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("strat_ids", nargs="*", metavar="RHAISTRAT-ID",
-                        help="Strategy IDs to submit epics for")
+    parser.add_argument("strat_ids", nargs="*", metavar="SOURCE-ID",
+                        help="Source issue IDs to submit epics for")
     parser.add_argument("--all", action="store_true",
                         help="Submit all strategies with passing reviews")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print planned actions without making API calls")
     parser.add_argument("--artifacts-dir", default="artifacts",
                         help="Artifacts directory (default: artifacts)")
+    parser.add_argument("--workload", help="Validated workload for typed artifact submission")
     args = parser.parse_args()
 
     if not args.strat_ids and not args.all:
-        parser.error("Provide RHAISTRAT IDs or use --all")
+        parser.error("Provide source issue IDs or use --all")
+
+    if args.workload:
+        from workload_submit import run_submission
+        sys.exit(run_submission(args))
 
     server, user, token = require_env()
     if not args.dry_run and not all([server, user, token]):
@@ -673,6 +682,14 @@ def main():
         print(f"\n{'='*60}")
         print(f"Strategy: {strat_id}")
         print(f"{'='*60}")
+
+        # Typed artifacts must never enter the compatibility submission path.
+        candidates = [os.path.join(args.artifacts_dir, "strat-tasks", f"{strat_id}.md"),
+                      os.path.join(args.artifacts_dir, "epic-reviews", f"{strat_id}-decomp-review.md")]
+        candidates += glob.glob(os.path.join(args.artifacts_dir, "epic-tasks", f"{strat_id}-*.md"))
+        if any(read_frontmatter(path)[0].get("workload_id") for path in candidates):
+            print("Error: typed artifacts require explicit --workload selection", file=sys.stderr)
+            sys.exit(1)
 
         # Check review status
         passed, review_data = _check_review_passed(args.artifacts_dir,

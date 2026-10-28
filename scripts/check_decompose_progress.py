@@ -14,6 +14,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
+from pipeline_status import read_status
 
 
 PHASE_CHECKS = {
@@ -39,6 +40,11 @@ def _decompose_complete(strat_id, data):
 
 def check_id(phase, strat_id):
     """Check one ID. Returns 'completed', 'pending', or 'error'."""
+    status = read_status(strat_id)
+    if status and status["status"] == "invalid":
+        return "error"
+    if status and status["status"] == "skipped" and phase == "fetch":
+        return "completed"
     path = PHASE_CHECKS[phase](strat_id)
     if not os.path.exists(path):
         return "pending"

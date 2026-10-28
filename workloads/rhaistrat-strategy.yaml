@@ -1,0 +1,49 @@
+schema_version: 1
+id: rhaistrat-strategy
+version: 1
+source:
+  project: RHAISTRAT
+  issue_type: Feature
+  id_pattern: '^RHAISTRAT-\d+$'
+  attachment_template: '{key}-strategy.md'
+  description_fallback: true
+  ready_labels:
+    - strat-creator-rubric-pass
+    - strat-creator-human-sign-off
+  skip_policy: child-epics
+  processed_label: epic-creator-auto-decomposed
+  handoff_type: rfe-strategy
+  identity_fields: [strat_id, jira_key]
+submission:
+  project: RHAI
+  issue_type: Epic
+  parent:
+    relation: parent
+  dependency_link_type: Blocks
+  labels:
+    created: epic-creator-auto-created
+    investigation: epic-creator-investigation
+    implementation_prefix: epic-creator-impl-
+    ai_prefix: epic-creator-ai-impl-
+    needs_component: epic-creator-needs-component
+planning:
+  artifact_template: workloads/policies/rhai/v1/artifacts.md
+  scoring: workloads/policies/rhai/v1/scoring.yaml
+  decompose: workloads/policies/rhai/v1/decompose.md
+  review: workloads/policies/rhai/v1/review.md
+  revise: workloads/policies/rhai/v1/revise.md
+  components:
+    project: RHAI
+    file: .context/rhai-components.txt
+  review_gate:
+    criteria:
+    - HLR Coverage
+    - DAG Coherence
+    - Epic Boundaries
+    - Type Correctness
+    - AI Implementability Scoring
+    - Acceptance Criteria Quality
+    - Completeness
+    points_per_criterion: 2
+    pass_score: 10
+    zero_fails: true

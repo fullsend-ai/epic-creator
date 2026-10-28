@@ -26,6 +26,11 @@ import sys
 from datetime import datetime, timezone
 
 import yaml
+from pipeline_workload import (BOUND_FIELDS, bound_workload, phase_config,
+                               validate_ids, validate_completed, validate_inputs)
+from pipeline_status import (all_statuses, clear_all_statuses, clear_status,
+                             read_status, write_status)
+from workload import WorkloadError, get_workload
 
 STATE_FILE = "tmp/pipeline-state.yaml"
 WAVE_IDS_FILE = "tmp/pipeline-wave-ids.txt"
@@ -132,7 +137,15 @@ def _load_state():
         print(f"State file not found: {STATE_FILE}", file=sys.stderr)
         sys.exit(1)
     with open(STATE_FILE) as f:
-        return yaml.safe_load(f)
+        state = yaml.safe_load(f)
+    if not isinstance(state, dict):
+        raise WorkloadError("Malformed pipeline state")
+    bound_workload(state)
+    return state
+
+
+def _phase_config(state):
+    return phase_config(state, PHASE_CONFIG.get(state["phase"], {"type": "noop"}))
 
 
 def _save_state(state):
@@ -158,6 +171,37 @@ def _write_ids(path, ids):
 def _copy_ids(src, dst):
     os.makedirs(os.path.dirname(dst) or "tmp", exist_ok=True)
     shutil.copy2(src, dst)
+
+
+def _validate_ids_individually(state, phase, ids_file, validator):
+    """Keep one bad source from stopping the rest of a batch."""
+    ids = _read_ids(ids_file)
+    valid_ids = []
+    for key in ids:
+        status = read_status(key)
+        if status:
+            # Invalid sources are retried through ERROR_COLLECT. Intentional
+            # skips are terminal and stay out of downstream phases.
+            continue
+        try:
+            validator(state, phase, key)
+        except WorkloadError as exc:
+            write_status(key, "invalid", phase.lower(), str(exc))
+            print(f"{phase}: {key} invalid: {exc}", file=sys.stderr)
+            continue
+        valid_ids.append(key)
+
+    if valid_ids != ids:
+        _write_ids(ids_file, valid_ids)
+    return valid_ids
+
+
+def _validate_completed_one(state, phase, key):
+    validate_completed(state, phase, [key])
+
+
+def _validate_inputs_one(state, phase, key):
+    validate_inputs(state, phase, [key])
 
 
 def _reset_revised_flag(decomp_path):
@@ -190,15 +234,16 @@ def _run_script(cmd):
     return result.stdout.strip()
 
 
-def _compute_ai_scores(ids_file):
+def _compute_ai_scores(ids_file, state):
     """Compute AI implementability scores from signal values in epic frontmatter."""
     ids = _read_ids(ids_file)
     if not ids:
         return
-    cmd = f"python3 scripts/compute_ai_scores.py {' '.join(ids)}"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
+    from compute_ai_scores import compute_for_strategy
+    validate_ids(state, ids)
+    planning = bound_workload(state).planning
+    for key in ids:
+        compute_for_strategy(key, planning)
 
 
 # ---------- Transition logic ----------
@@ -212,6 +257,10 @@ def advance(state, dry_run=False):
     Returns (next_phase, summary_line).
     """
     phase = state["phase"]
+    if not dry_run and phase in ("FETCH", "DECOMPOSE", "REVIEW_DECOMP", "REVISE_DECOMP", "RE_REVIEW", "RE_REVISE"):
+        config = _phase_config(state)
+        _validate_ids_individually(
+            state, phase, config["ids_file"], _validate_completed_one)
 
     # --- BATCH_START: reset counters, populate active IDs ---
     if phase == "BATCH_START":
@@ -219,6 +268,11 @@ def advance(state, dry_run=False):
         if not dry_run:
             state["batch"] = batch
             batch_file = f"tmp/pipeline-batch-{batch}-ids.txt"
+            if state.get("retry_cycle", 0) > 0:
+                for key in _read_ids(batch_file):
+                    status = read_status(key)
+                    if status and status["status"] == "invalid":
+                        clear_status(key)
             _copy_ids(batch_file, "tmp/pipeline-active-ids.txt")
         return "FETCH", f"BATCH_START → FETCH: batch={batch}"
 
@@ -226,7 +280,7 @@ def advance(state, dry_run=False):
     if phase in MAIN_SEQUENCE[:-1]:
         nxt = MAIN_SEQUENCE[MAIN_SEQUENCE.index(phase) + 1]
         if phase == "DECOMPOSE" and not dry_run:
-            _compute_ai_scores("tmp/pipeline-active-ids.txt")
+            _compute_ai_scores("tmp/pipeline-active-ids.txt", state)
         return nxt, f"{phase} → {nxt}"
 
     # --- REVIEW_DECOMP → REVISE_DECOMP (unconditional first revision) ---
@@ -244,7 +298,7 @@ def advance(state, dry_run=False):
     # --- REVISE_DECOMP → RE_REVIEW_CHECK ---
     if phase == "REVISE_DECOMP":
         if not dry_run:
-            _compute_ai_scores("tmp/pipeline-active-ids.txt")
+            _compute_ai_scores("tmp/pipeline-active-ids.txt", state)
         return "RE_REVIEW_CHECK", "REVISE_DECOMP → RE_REVIEW_CHECK"
 
     # --- RE_REVIEW_CHECK: did revision change anything? ---
@@ -313,7 +367,7 @@ def advance(state, dry_run=False):
     # --- RE_REVISE → RE_REVIEW_CHECK (loop back) ---
     if phase == "RE_REVISE":
         if not dry_run:
-            _compute_ai_scores("tmp/pipeline-revise-ids.txt")
+            _compute_ai_scores("tmp/pipeline-revise-ids.txt", state)
         return "RE_REVIEW_CHECK", "RE_REVISE → RE_REVIEW_CHECK"
 
     # --- BATCH_DONE decision ---
@@ -332,7 +386,14 @@ def advance(state, dry_run=False):
             # Check for errors
             all_ids = _read_ids("tmp/pipeline-all-ids.txt")
             error_ids = []
+            statuses = all_statuses()
             for strat_id in all_ids:
+                status = statuses.get(strat_id)
+                if status and status["status"] == "skipped":
+                    continue
+                if status and status["status"] == "invalid":
+                    error_ids.append(strat_id)
+                    continue
                 review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
                 if os.path.exists(review_path):
                     try:
@@ -379,9 +440,14 @@ def cmd_init(args):
     parser.add_argument("--batch-size", type=int, default=25)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--announce-complete", action="store_true")
+    parser.add_argument("--workload", help="Select a registered planning workload")
     opts = parser.parse_args(args)
+    selected = get_workload(opts.workload or "rhaistrat-strategy")
+    if selected.planning is None:
+        raise WorkloadError(f"{selected.id}: no planning policy configured")
 
     os.makedirs("tmp", exist_ok=True)
+    clear_all_statuses()
     for f in glob.glob("tmp/pipeline-batch-*-ids.txt"):
         os.remove(f)
     if os.path.exists(DISPATCH_MARKER):
@@ -396,6 +462,12 @@ def cmd_init(args):
         "start_time": datetime.now(timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"),
         "retry_cycle": 0,
+        "workload_id": selected.id,
+        "workload_version": selected.version,
+        "workload_digest": selected.digest,
+        "planning_digest": selected.planning.digest,
+        "workload_explicit": opts.workload is not None,
+        "source_bindings": {},
     }
     _save_state(state)
     print(f"Initialized pipeline state: batch_size={opts.batch_size}")
@@ -420,7 +492,7 @@ def cmd_set_phase(args):
 def cmd_get_phase_config(args):
     state = _load_state()
     phase = state["phase"]
-    config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
+    config = _phase_config(state)
     config["phase"] = phase
     config.pop("command", None)
     config.pop("pre_script", None)
@@ -438,7 +510,7 @@ def cmd_get_phase_config(args):
 def cmd_run_phase(args):
     state = _load_state()
     phase = state["phase"]
-    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    config = _phase_config(state)
     phase_type = config.get("type", "noop")
     if phase_type != "script":
         print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'",
@@ -489,7 +561,7 @@ def cmd_next_action(args):
 
     for _ in range(MAX_NEXT_ACTION_ITERATIONS):
         phase = state["phase"]
-        config = PHASE_CONFIG.get(phase, {"type": "noop"})
+        config = _phase_config(state)
         phase_type = config.get("type", "noop")
 
         # --- DONE ---
@@ -530,7 +602,8 @@ def cmd_next_action(args):
         # --- Agent: compute next wave ---
         if phase_type == "agent":
             ids_file = config.get("ids_file", "")
-            all_ids = _read_ids(ids_file)
+            all_ids = _validate_ids_individually(
+                state, phase, ids_file, _validate_inputs_one)
             poll_phase = config.get("poll_phase", "")
 
             phases_to_check = [poll_phase] if poll_phase else []
@@ -725,6 +798,8 @@ def cmd_set(args):
             print(f"Invalid key=value: {arg}", file=sys.stderr)
             sys.exit(1)
         k, v = arg.split("=", 1)
+        if k in BOUND_FIELDS:
+            raise WorkloadError(f"Cannot change bound pipeline field {k}")
         if v.isdigit():
             v = int(v)
         elif v.lower() in ("true", "false"):
@@ -862,4 +937,8 @@ if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(f"Commands: {', '.join(COMMANDS)}", file=sys.stderr)
         sys.exit(1)
-    COMMANDS[sys.argv[1]](sys.argv[2:])
+    try:
+        COMMANDS[sys.argv[1]](sys.argv[2:])
+    except WorkloadError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)

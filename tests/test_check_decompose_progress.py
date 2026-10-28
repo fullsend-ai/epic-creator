@@ -13,6 +13,7 @@ from check_decompose_progress import (
     _format_status,
     check_id,
 )
+from pipeline_status import write_status
 
 
 # ── check_id ──
@@ -25,6 +26,16 @@ class TestCheckId:
             {"fetch": lambda id: str(tmp_path / f"{id}.md")},
         ):
             assert check_id("fetch", "RHAISTRAT-1") == "pending"
+
+    @pytest.mark.parametrize(("status", "expected"), [
+        ("skipped", "completed"),
+        ("invalid", "error"),
+    ])
+    def test_fetch_terminal_status_does_not_remain_pending(
+            self, tmp_path, monkeypatch, status, expected):
+        monkeypatch.chdir(tmp_path)
+        write_status("RHOAIENG-1", status, "fetch", "synthetic outcome")
+        assert check_id("fetch", "RHOAIENG-1") == expected
 
     def test_existing_file_is_completed(self, tmp_path):
         f = tmp_path / "RHAISTRAT-1.md"
