@@ -1,0 +1,18 @@
+extends: ../epic-decompose.yaml
+
+# Fullsend profile for AISDLC-430. The base remains the Claude Code baseline;
+# this overlay changes only the execution runtime and removes the Claude Code
+# tool interceptor, which the Fullsend runner rejects because its sandbox never
+# receives the harness interception hooks.
+runner:
+  type: fullsend
+  agent: epic-creator-eval
+  extra_args: ["--forge", "github"]
+
+execution:
+  env:
+    JIRA_USER: ""
+    JIRA_TOKEN: ""
+
+inputs:
+  tools: !replace []

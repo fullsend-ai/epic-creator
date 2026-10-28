@@ -15,6 +15,11 @@
 # fullsend-dir-relative paths below (epic-creator/epic-creator.yaml would look for
 # .fullsend/epic-creator/epic-creator/epic-creator.yaml).
 base: epic-creator.yaml
+# The production prompt under this harness's name. fullsend's Claude runtime
+# refuses a prompt whose frontmatter name is not the harness name, and
+# prompt.md declares `epic-creator`; prompt-eval.md differs from it only in the
+# frontmatter. A test keeps the two bodies identical.
+agent: epic-creator/prompt-eval.md
 
 env:
   sandbox:
