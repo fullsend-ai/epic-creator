@@ -71,7 +71,9 @@ pre-script and post-script. It overrides only:
 - `env.sandbox`: `JIRA_SERVER`/`JIRA_USER` as literals, and
   `CLAUDE_CODE_SUBAGENT_MODEL` from `${AGENT_EVAL_SUBAGENT_MODEL}`;
 - `env.runner`: the three `JIRA_*` keys as literals (`JIRA_TOKEN: "eval-no-jira"`), so the
-  host needs no Jira credentials;
+  host needs no Jira credentials, plus `EPIC_SKIP_BOOTSTRAP=1` and
+  `EPIC_SKIP_COMPONENT_FETCH=1`; the inherited pre-script runs on the host before
+  `env.sandbox` is applied, and these flags preserve the pre-provisioned eval fixtures;
 - the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential). The
   production Jira profile is inherited unchanged, including enforced read-only access.
 
@@ -86,7 +88,8 @@ fullsend run epic-creator-eval --fullsend-dir .fullsend --target-repo . --model 
 
 where `.env` holds the four Vertex variables above plus
 `FULLSEND_TASK="/epic-decompose RHAISTRAT-1234 --headless"` and
-`AGENT_EVAL_SUBAGENT_MODEL=claude-opus-4-6`.
+`AGENT_EVAL_SUBAGENT_MODEL=claude-opus-4-6`. No Jira credentials or Epic skip flags are
+needed: the eval child supplies them.
 
 ### Fullsend evaluation profile
 

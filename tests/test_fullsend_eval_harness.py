@@ -23,6 +23,7 @@ EVAL = HARNESS_DIR / "epic-creator-eval.yaml"
 EVAL_JIRA_SERVER = "https://redhat.atlassian.net"
 EVAL_JIRA_USER = "eval"
 EVAL_JIRA_TOKEN = "eval-no-jira"
+EVAL_SKIP = "1"
 
 # Every path at which the composed eval harness may differ from the production file.
 EXPECTED_DIFF = {
@@ -33,6 +34,8 @@ EXPECTED_DIFF = {
     "env.runner.JIRA_SERVER",
     "env.runner.JIRA_USER",
     "env.runner.JIRA_TOKEN",
+    "env.runner.EPIC_SKIP_BOOTSTRAP",
+    "env.runner.EPIC_SKIP_COMPONENT_FETCH",
     "providers",
 }
 
@@ -132,7 +135,15 @@ def test_eval_values():
         "JIRA_SERVER": EVAL_JIRA_SERVER,
         "JIRA_USER": EVAL_JIRA_USER,
         "JIRA_TOKEN": EVAL_JIRA_TOKEN,
+        "EPIC_SKIP_BOOTSTRAP": EVAL_SKIP,
+        "EPIC_SKIP_COMPONENT_FETCH": EVAL_SKIP,
     }
+
+
+def test_composed_runner_env_skips_host_pre_script_work():
+    composed = _compose(_load(PRODUCTION), _load(EVAL))
+    assert composed["env"]["runner"]["EPIC_SKIP_BOOTSTRAP"] == EVAL_SKIP
+    assert composed["env"]["runner"]["EPIC_SKIP_COMPONENT_FETCH"] == EVAL_SKIP
 
 
 def test_eval_provider_replaces_jira_provider_with_literal_credential():

@@ -34,6 +34,9 @@ env:
     JIRA_SERVER: "https://redhat.atlassian.net"
     JIRA_USER: "eval"
     JIRA_TOKEN: "eval-no-jira"
+    # The inherited pre-script runs on the host before env.sandbox is applied.
+    EPIC_SKIP_BOOTSTRAP: "1"
+    EPIC_SKIP_COMPONENT_FETCH: "1"
 
 providers:
   # Replaces the production provider (name: jira) with a literal credential.
