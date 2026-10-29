@@ -63,9 +63,16 @@ right now it's 3.6 only.
 
 We deliberately stay out of the way in these cases:
 
-- **It already has epics.** If the strategy already has child Epics (or a legacy
-  "Incorporates" link), we skip it and never re-decompose — your existing
-  breakdown wins.
+- **It already has epics.** If the strategy already has child Epics or a legacy
+  outgoing "Incorporates" link to an Epic, we skip it and never re-decompose —
+  your existing breakdown wins. Links to Outcomes or other non-Epic issues do
+  not trigger this skip.
+- **We couldn't check its existing epics.** If Jira lookup fails or a linked
+  issue's type cannot be determined, we log a warning and skip that strategy
+  for this run to avoid duplicate Epics. The remaining strategies continue.
+  If any checks fail and no strategies are fetched, the fetch command exits
+  with an error. The fetch still succeeds when every strategy is confirmed
+  to already have Epics.
 - **The quality review didn't pass.** A breakdown has to score **≥ 10 out of 14
   with no criterion scoring zero**. If it doesn't clear that bar, nothing is
   submitted to Jira. 

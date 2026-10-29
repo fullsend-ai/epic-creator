@@ -36,6 +36,8 @@ python3 scripts/fetch_strategy.py fetch "<query>" --ids-file tmp/pipeline-all-id
 
 Print `[DECOMPOSE] JQL: <jql>` from stderr output.
 
+If fetching fails, stop the run and report the script's error.
+
 **Explicit mode**:
 
 ```bash

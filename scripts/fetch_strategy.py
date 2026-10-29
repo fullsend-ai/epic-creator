@@ -6,6 +6,7 @@ Usage:
     python3 scripts/fetch_strategy.py fetch-one <RHAISTRAT-ID>
 """
 
+import http.client
 import os
 import sys
 import urllib.error
@@ -147,12 +148,33 @@ def _search_issues(server, user, token, jql, limit=100):
     return all_issues
 
 
+def _issue_type_name(issue):
+    """Read the issue type from either a linked issue or a full issue response."""
+    fields = issue.get("fields") or {}
+    issue_type = fields.get("issuetype") or {}
+    return issue_type.get("name")
+
+
 def _has_existing_epics(issue, server, user, token):
-    """Check if a strategy already has child epics or Incorporates links."""
+    """Check for child epics or outgoing Incorporates links to actual epics."""
     # Legacy check for pre-parent-field epics that used Incorporates links
     for link in issue.get("fields", {}).get("issuelinks", []):
-        link_type = link.get("type", {}).get("name", "")
-        if link_type == "Incorporates" and "outwardIssue" in link:
+        if link.get("type", {}).get("name") != "Incorporates":
+            continue
+        linked_issue = link.get("outwardIssue")
+        if not linked_issue:
+            continue
+
+        linked_key = linked_issue["key"]
+        issue_type = _issue_type_name(linked_issue)
+        if not issue_type:
+            full_issue = get_issue(server, user, token, linked_key,
+                                   fields=["issuetype"])
+            issue_type = _issue_type_name(full_issue or {})
+        if not issue_type:
+            raise ValueError(f"Cannot determine issue type for {linked_key} "
+                             f"incorporated by {issue['key']}")
+        if issue_type == "Epic":
             return True
     key = issue["key"]
     jql = f"parent = {key} AND issuetype = Epic"
@@ -185,13 +207,22 @@ def cmd_fetch(args):
 
     all_keys = []
     skipped = 0
+    failed_checks = 0
     for issue in issues:
         key = issue["key"]
-        if opts.skip_if_has_epics and _has_existing_epics(issue, server, user, token):
-            print(f"Skipped {key}: already has linked epics",
-                  file=sys.stderr)
-            skipped += 1
-            continue
+        if opts.skip_if_has_epics:
+            try:
+                has_epics = _has_existing_epics(issue, server, user, token)
+            except (ValueError, OSError, http.client.HTTPException) as e:
+                print(f"WARNING: Skipped {key}: could not check existing epics: {e}",
+                      file=sys.stderr)
+                failed_checks += 1
+                continue
+            if has_epics:
+                print(f"Skipped {key}: already has linked epics",
+                      file=sys.stderr)
+                skipped += 1
+                continue
         _write_strategy(issue, server=server, user=user, token=token)
         all_keys.append(key)
         print(f"Fetched {key}: {issue['fields'].get('summary', '')[:60]}",
@@ -205,7 +236,14 @@ def cmd_fetch(args):
     if skipped:
         print(f"Skipped {skipped} strategies with existing epics",
               file=sys.stderr)
+    if failed_checks:
+        print(f"Skipped {failed_checks} strategies because existing epics "
+              "could not be checked", file=sys.stderr)
     print(f"Fetched {len(all_keys)} strategies", file=sys.stderr)
+    if failed_checks and not all_keys:
+        print("ERROR: No strategies fetched and some existing-epic checks failed",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_fetch_one(args):

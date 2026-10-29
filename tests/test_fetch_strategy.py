@@ -4,7 +4,7 @@ import io
 import os
 import sys
 import urllib.error
-from http.client import HTTPResponse
+from http.client import BadStatusLine, HTTPResponse, IncompleteRead, RemoteDisconnected
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -253,15 +253,43 @@ class TestHasExistingEpics:
             "fields": {"issuelinks": links or []},
         }
 
-    def _incorporates_link(self):
+    def _incorporates_link(self, issue_type="Epic"):
         return {
             "type": {"name": "Incorporates", "outward": "incorporates"},
-            "outwardIssue": {"key": "RHAI-100"},
+            "outwardIssue": {
+                "key": "RHAI-100",
+                "fields": {"issuetype": {"name": issue_type}},
+            },
         }
 
-    def test_returns_true_for_incorporates_link(self):
+    def test_returns_true_for_incorporated_epic(self):
         issue = self._make_issue(links=[self._incorporates_link()])
         result = _has_existing_epics(issue, "s", "u", "t")
+        assert result is True
+
+    @pytest.mark.parametrize("issue_type", ["Outcome", "Feature", "Task"])
+    def test_does_not_skip_for_incorporated_non_epic(self, issue_type):
+        issue = self._make_issue(links=[self._incorporates_link(issue_type)])
+        with patch("fetch_strategy.api_call_with_retry",
+                   return_value={"issues": []}) as mock_api, \
+             patch("fetch_strategy.get_issue") as mock_get:
+            result = _has_existing_epics(issue, "s", "u", "t")
+        assert result is False
+        mock_api.assert_called_once_with(
+            "s", "/search/jql?jql=parent%20%3D%20RHAISTRAT-1234%20AND%20"
+            "issuetype%20%3D%20Epic&maxResults=1&fields=key", "u", "t")
+        mock_get.assert_not_called()
+
+    def test_checks_later_links_for_epics(self):
+        issue = self._make_issue(links=[self._incorporates_link("Outcome"),
+                                      self._incorporates_link("Epic")])
+        assert _has_existing_epics(issue, "s", "u", "t") is True
+
+    def test_checks_child_epics_after_non_epic_link(self):
+        issue = self._make_issue(links=[self._incorporates_link("Outcome")])
+        with patch("fetch_strategy.api_call_with_retry",
+                   return_value={"issues": [{"key": "RHOAIENG-100"}]}):
+            result = _has_existing_epics(issue, "s", "u", "t")
         assert result is True
 
     def test_returns_true_for_child_epics(self):
@@ -278,11 +306,59 @@ class TestHasExistingEpics:
             result = _has_existing_epics(issue, "s", "u", "t")
         assert result is False
 
-    def test_skips_api_call_when_incorporates_found(self):
+    def test_skips_api_calls_when_incorporated_epic_found(self):
         issue = self._make_issue(links=[self._incorporates_link()])
-        with patch("fetch_strategy.api_call_with_retry") as mock_api:
+        with patch("fetch_strategy.api_call_with_retry") as mock_api, \
+             patch("fetch_strategy.get_issue") as mock_get:
             _has_existing_epics(issue, "s", "u", "t")
         mock_api.assert_not_called()
+        mock_get.assert_not_called()
+
+    @pytest.mark.parametrize("issue_type, expected", [("Epic", True),
+                                                      ("Outcome", False)])
+    @pytest.mark.parametrize("fields", [{}, {"issuetype": None}])
+    def test_fetches_missing_linked_issue_type(self, issue_type, expected,
+                                             fields):
+        link = self._incorporates_link()
+        link["outwardIssue"]["fields"] = fields
+        issue = self._make_issue(links=[link])
+        with patch("fetch_strategy.get_issue", return_value={
+            "fields": {"issuetype": {"name": issue_type}},
+        }) as mock_get, \
+             patch("fetch_strategy.api_call_with_retry",
+                   return_value={"issues": []}) as mock_api:
+            result = _has_existing_epics(issue, "s", "u", "t")
+        assert result is expected
+        mock_get.assert_called_once_with("s", "u", "t", "RHAI-100",
+                                         fields=["issuetype"])
+        assert mock_api.call_count == (0 if expected else 1)
+
+    def test_reports_unresolved_linked_issue_type(self):
+        link = self._incorporates_link()
+        del link["outwardIssue"]["fields"]
+        issue = self._make_issue(links=[link])
+        with patch("fetch_strategy.get_issue", return_value={"fields": {}}), \
+             pytest.raises(ValueError, match="RHAI-100.*RHAISTRAT-1234"):
+            _has_existing_epics(issue, "s", "u", "t")
+
+    def test_propagates_linked_issue_lookup_failure(self):
+        link = self._incorporates_link()
+        del link["outwardIssue"]["fields"]
+        issue = self._make_issue(links=[link])
+        with patch("fetch_strategy.get_issue", side_effect=urllib.error.URLError(
+            "lookup failed")), pytest.raises(urllib.error.URLError):
+            _has_existing_epics(issue, "s", "u", "t")
+
+    def test_ignores_incoming_incorporates_link(self):
+        link = self._incorporates_link()
+        link["inwardIssue"] = link.pop("outwardIssue")
+        issue = self._make_issue(links=[link])
+        with patch("fetch_strategy.api_call_with_retry",
+                   return_value={"issues": []}), \
+             patch("fetch_strategy.get_issue") as mock_get:
+            result = _has_existing_epics(issue, "s", "u", "t")
+        assert result is False
+        mock_get.assert_not_called()
 
     def test_ignores_non_incorporates_links(self):
         issue = self._make_issue(links=[{
@@ -334,6 +410,163 @@ class TestSkipIfHasEpicsFlag:
         with open(ids_file) as f:
             ids = f.read().strip().split("\n")
         assert ids == ["RHAISTRAT-1", "RHAISTRAT-3"]
+
+    def test_fetches_strategy_with_outcome_and_skips_epics(self, tmp_path,
+                                                         monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        issues = self._make_issues(3)
+        for issue, issue_type in zip(issues, ["Outcome", "Epic", "Outcome"]):
+            issue["fields"]["issuelinks"] = [{
+                "type": {"name": "Incorporates", "outward": "incorporates"},
+                "outwardIssue": {
+                    "key": "RHAI-100",
+                    "fields": {"issuetype": {"name": issue_type}},
+                },
+            }]
+
+        ids_file = tmp_path / "ids.txt"
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy._search_issues", return_value=issues), \
+             patch("fetch_strategy.api_call_with_retry", side_effect=[
+                 {"issues": []}, {"issues": [{"key": "RHOAIENG-100"}]},
+             ]):
+            from fetch_strategy import cmd_fetch
+            cmd_fetch(["some jql", "--ids-file", str(ids_file),
+                       "--skip-if-has-epics"])
+
+        assert ids_file.read_text().splitlines() == ["RHAISTRAT-1"]
+        strategy_dir = tmp_path / "artifacts" / "strat-tasks"
+        assert (strategy_dir / "RHAISTRAT-1.md").exists()
+        assert not (strategy_dir / "RHAISTRAT-2.md").exists()
+        assert not (strategy_dir / "RHAISTRAT-3.md").exists()
+
+    @pytest.mark.parametrize("lookup_result", [
+        pytest.param({"fields": {}}, id="unresolved-type"),
+        pytest.param(urllib.error.HTTPError(
+            "https://jira.example.com/issue/RHAI-100", 403, "Forbidden", {}, None),
+            id="forbidden"),
+        pytest.param(urllib.error.HTTPError(
+            "https://jira.example.com/issue/RHAI-100", 404, "Not Found", {}, None),
+            id="not-found"),
+        pytest.param(urllib.error.URLError("lookup failed"), id="network-error"),
+        pytest.param(TimeoutError("lookup timed out"), id="timeout"),
+        pytest.param(RemoteDisconnected("connection closed"), id="disconnected"),
+        pytest.param(IncompleteRead(b"partial"), id="incomplete-read"),
+        pytest.param(BadStatusLine("invalid status"), id="bad-status-line"),
+        pytest.param(ConnectionResetError("connection reset"), id="connection-reset"),
+        pytest.param(None, id="empty-response"),
+    ])
+    def test_failed_link_lookup_does_not_abort_batch(
+            self, tmp_path, monkeypatch, capsys, lookup_result):
+        monkeypatch.chdir(tmp_path)
+        issues = self._make_issues(4)
+        issues[1]["fields"]["issuelinks"] = [{
+            "type": {"name": "Incorporates"},
+            "outwardIssue": {"key": "RHAI-100"},
+        }]
+        issues[3]["fields"]["issuelinks"] = [{
+            "type": {"name": "Incorporates"},
+            "outwardIssue": {
+                "key": "RHAI-101",
+                "fields": {"issuetype": {"name": "Epic"}},
+            },
+        }]
+
+        ids_file = tmp_path / "ids.txt"
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy._search_issues", return_value=issues), \
+             patch("fetch_strategy.get_issue", side_effect=[lookup_result]), \
+             patch("fetch_strategy.api_call_with_retry", return_value={"issues": []}):
+            from fetch_strategy import cmd_fetch
+            cmd_fetch(["some jql", "--ids-file", str(ids_file),
+                       "--skip-if-has-epics"])
+
+        assert ids_file.read_text().splitlines() == ["RHAISTRAT-1", "RHAISTRAT-3"]
+        strategy_dir = tmp_path / "artifacts" / "strat-tasks"
+        assert sorted(path.name for path in strategy_dir.iterdir()) == [
+            "RHAISTRAT-1.md", "RHAISTRAT-3.md",
+        ]
+        stderr = capsys.readouterr().err
+        assert "WARNING: Skipped RHAISTRAT-2: could not check existing epics:" in stderr
+        reason = (str(lookup_result) if isinstance(lookup_result, Exception)
+                  else "Cannot determine issue type for RHAI-100")
+        assert reason in stderr
+        assert "Skipped 1 strategies with existing epics" in stderr
+        assert "Skipped 1 strategies because existing epics could not be checked" in stderr
+        assert "Fetched 2 strategies" in stderr
+
+    @pytest.mark.parametrize("error", [
+        pytest.param(IncompleteRead(b"partial"), id="incomplete-read"),
+        pytest.param(BadStatusLine("invalid status"), id="bad-status-line"),
+    ])
+    def test_failed_parent_check_does_not_abort_batch(
+            self, tmp_path, monkeypatch, capsys, error):
+        monkeypatch.chdir(tmp_path)
+        ids_file = tmp_path / "ids.txt"
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy._search_issues", return_value=self._make_issues(3)), \
+             patch("fetch_strategy.api_call_with_retry", side_effect=[
+                 {"issues": []}, error, {"issues": []},
+             ]):
+            from fetch_strategy import cmd_fetch
+            cmd_fetch(["some jql", "--ids-file", str(ids_file),
+                       "--skip-if-has-epics"])
+
+        assert ids_file.read_text().splitlines() == ["RHAISTRAT-1", "RHAISTRAT-3"]
+        strategy_dir = tmp_path / "artifacts" / "strat-tasks"
+        assert sorted(path.name for path in strategy_dir.iterdir()) == [
+            "RHAISTRAT-1.md", "RHAISTRAT-3.md",
+        ]
+        stderr = capsys.readouterr().err
+        assert "WARNING: Skipped RHAISTRAT-2: could not check existing epics:" in stderr
+        assert str(error) in stderr
+        assert "Fetched 2 strategies" in stderr
+
+    @pytest.mark.parametrize("check_results, expected_exit", [
+        pytest.param([
+            urllib.error.URLError("lookup failed"),
+            urllib.error.URLError("lookup failed"),
+        ], 1, id="all-checks-failed"),
+        pytest.param([
+            {"issues": [{"key": "RHAI-100"}]},
+            urllib.error.URLError("lookup failed"),
+        ], 1, id="existing-epics-and-failed-check"),
+        pytest.param([
+            {"issues": [{"key": "RHAI-100"}]},
+            {"issues": [{"key": "RHAI-101"}]},
+        ], 0, id="all-have-epics"),
+        pytest.param([], 0, id="no-matching-strategies"),
+    ])
+    def test_empty_batch_exit_status(
+            self, tmp_path, monkeypatch, capsys, check_results, expected_exit):
+        monkeypatch.chdir(tmp_path)
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAISTRAT-9999\n")
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy._search_issues",
+                   return_value=self._make_issues(len(check_results))), \
+             patch("fetch_strategy.api_call_with_retry",
+                   side_effect=check_results):
+            from fetch_strategy import cmd_fetch
+            args = ["some jql", "--ids-file", str(ids_file), "--skip-if-has-epics"]
+            if expected_exit:
+                with pytest.raises(SystemExit) as exc_info:
+                    cmd_fetch(args)
+                assert exc_info.value.code == expected_exit
+            else:
+                cmd_fetch(args)
+
+        assert ids_file.read_text() == ""
+        assert not (tmp_path / "artifacts" / "strat-tasks").exists()
+        stderr = capsys.readouterr().err
+        error_message = "ERROR: No strategies fetched and some existing-epic checks failed"
+        if expected_exit:
+            assert error_message in stderr
+            failed_checks = sum(isinstance(result, Exception) for result in check_results)
+            assert (f"Skipped {failed_checks} strategies because existing epics "
+                    "could not be checked") in stderr
+        else:
+            assert "ERROR:" not in stderr
 
     def test_fetches_all_without_flag(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
