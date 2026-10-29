@@ -133,8 +133,8 @@ are cleaned between runs):
 3. Bootstrap `.context/` (arch context + component list; one retry, then hard stop).
 4. Batch split → `tmp/pipeline-batch-N-ids.txt`.
 5. Dispatch loop on `next-action`: BATCH_START → FETCH → DECOMPOSE →
-   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (first revision
-   unconditional) → RE_REVIEW/RE_REVISE loop (cap 2 cycles) → BATCH_DONE →
+   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (skipped for IDs
+   whose first review is a clean pass) → RE_REVIEW/RE_REVISE loop (cap 2 cycles) → BATCH_DONE →
    ERROR_COLLECT (one retry batch) → REPORT → DONE. After every wave the next Bash call
    **must** be `pipeline_state.py wait-for-wave` (exit 3 → re-run).
 6. REPORT: `generate_run_report.py`; teardown: `batch_summary.py --counts-only` prints

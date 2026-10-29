@@ -263,10 +263,11 @@ judges:
         epic_id silently drops a Jira Blocks link that dag_valid — which keys
         nodes by *filename* — cannot see;
       - sentinels: decompose_complete true (decompose-agent.md:332-336) and
-        `revised` non-null. pipeline_state.py:290-299 makes the first
-        REVIEW_DECOMP -> REVISE_DECOMP transition unconditional and clears the
-        revised default so the poller waits, and
-        check_decompose_progress.py:73-84 treats non-null `revised` as the
+        `revised` non-null. The schema writes revised: false when the summary
+        is created; REVIEW_DECOMP -> REVISE_DECOMP clears it only for IDs that
+        will be revised (every ID except a clean pass: pass true, accept,
+        score >= 10, no issues), and check_decompose_progress.py:73-84 treats
+        non-null `revised` as the
         revise-phase completion sentinel — so a completed run must leave it set;
       - triage set implies a non-empty triage_rationale and exactly one epic
         (decompose-agent.md:20-34, review-agent.md:32);
@@ -394,7 +395,7 @@ judges:
               probs.append("summary: decompose_complete sentinel not true")
           if s.get("revised") is None:
               probs.append("summary: revise-phase sentinel 'revised' absent"
-                           " (REVISE_DECOMP is unconditional)")
+                           " (schema default or revise agent sets it)")
           elif not isinstance(s.get("revised"), bool):
               probs.append("summary: revised not a bool (%r)" % s.get("revised"))
           tri = s.get("triage")
