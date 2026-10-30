@@ -60,3 +60,57 @@ is useful for debugging.
 Jira access from the sandbox is read-only; local runs produce artifacts for
 review. Submission currently uses the standalone `scripts/submit.py` script
 rather than a skill and can be run separately.
+
+## Eval variant
+
+`epic-creator-eval.yaml` (agent `epic-creator-eval`) runs the same package for the
+epic-creator eval: it sets `base: epic-creator.yaml` (fullsend resolves `base` relative to the
+child file) and inherits the prompt, scripts, image, policy, validation loop (DONE gate),
+pre-script and post-script. It overrides only:
+
+- `env.sandbox`: `JIRA_SERVER`/`JIRA_USER` as literals, and
+  `CLAUDE_CODE_SUBAGENT_MODEL` from `${AGENT_EVAL_SUBAGENT_MODEL}`;
+- `env.runner`: the three `JIRA_*` keys as literals (`JIRA_TOKEN: "eval-no-jira"`), so the
+  host needs no Jira credentials, plus `EPIC_SKIP_BOOTSTRAP=1` and
+  `EPIC_SKIP_COMPONENT_FETCH=1`; the inherited pre-script runs on the host before
+  `env.sandbox` is applied, and these flags preserve the pre-provisioned eval fixtures;
+- the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential). The
+  production Jira profile is inherited unchanged, including enforced read-only access.
+
+The model comes from `fullsend run --model`. `tests/test_fullsend_eval_harness.py` pins the
+child to exactly these overrides. Run it locally, with no `JIRA_*` variables on the host, from
+a copy of the checkout holding the pre-provisioned strategy under
+`artifacts/strat-tasks/` and its matching `.context/`:
+
+```bash
+fullsend run epic-creator-eval --fullsend-dir .fullsend --target-repo . --model claude-opus-4-6 --env-file .env
+```
+
+where `.env` holds the four Vertex variables above plus
+`FULLSEND_TASK="/epic-decompose RHAISTRAT-1234 --headless"` and
+`AGENT_EVAL_SUBAGENT_MODEL=claude-opus-4-6`. No Jira credentials or Epic skip flags are
+needed: the eval child supplies them.
+
+### Fullsend evaluation profile
+
+`eval/profiles/fullsend.yaml` layers over `eval/epic-decompose.yaml`. It keeps
+the baseline tasks, fixtures, scoring, thresholds, and judges, changes the
+runner to `fullsend`, selects `epic-creator-eval`, and removes the baseline's
+Claude Code tool interceptor because the Fullsend sandbox does not receive the
+eval harness interception hooks.
+
+Use `agent-eval-harness >= 1.59.0` and `fullsend >= 0.51.0`; `v0.50.0`
+predates the profile canonicalization fix. The run also needs an OpenShell
+gateway and GCP Vertex credentials, just like the production Fullsend path.
+The comparison case can then be run with:
+
+```bash
+/eval-run --config eval/profiles/fullsend.yaml \
+  --cases case-001-simple-two-component \
+  --model claude-opus-4-6
+```
+
+The run directory contains per-case artifacts, transcripts, metrics, logs, and
+failure diagnostics. Score it with the same judges as the Claude baseline and
+compare it against `claude-baseline-case001`; any runtime-caused differences
+should be recorded in the PR description.
