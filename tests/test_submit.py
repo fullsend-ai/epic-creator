@@ -4,6 +4,9 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+from http.client import BadStatusLine, IncompleteRead
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -26,6 +29,7 @@ from submit import (
     PRIORITY_MAP,
 )
 from artifact_utils import read_frontmatter
+import submit as submit_module
 
 PYTHON = sys.executable
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
@@ -671,6 +675,239 @@ class TestCreateEpicsAssignee:
             _create_epics("s", "u", "t", plan, "RHAISTRAT-9999")
 
         assert mock_ci.call_args.kwargs.get("assignee_id") is None
+
+
+@pytest.fixture
+def submission_boundaries(monkeypatch):
+    """Keep real plan/creation logic, but stub every network and write boundary."""
+    mutations = {}
+    for name, result in (
+        ("create_issue", "RHAI-9003"),
+        ("_create_dependency_links", 0),
+        ("_attach_frontmatter", 0),
+        ("_attach_branch_plans", 0),
+        ("_label_strategy", True),
+    ):
+        mutations[name] = MagicMock(return_value=result)
+        monkeypatch.setattr(submit_module, name, mutations[name])
+
+    strategy = {"key": "RHAISTRAT-9999", "fields": {
+        "issuelinks": [], "assignee": None,
+    }}
+    get_issue = MagicMock(return_value=strategy)
+    monkeypatch.setattr(submit_module, "get_issue", get_issue)
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("Submission safety tests must not access the network")
+
+    monkeypatch.setattr("urllib.request.urlopen", no_network)
+    return mutations, get_issue
+
+
+class TestSubmissionSafety:
+    def _plan(self, epic_count=1):
+        _setup_strategy(epic_count=epic_count)
+        return _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), set())
+
+    def _assert_no_writes(self, boundaries):
+        for mutation in boundaries[0].values():
+            mutation.assert_not_called()
+
+    @pytest.mark.parametrize("page", [
+        {"issues": [{"key": "RHAISTRAT-9999"}, {"key": "RHOAIENG-9002"}],
+         "isLast": True},
+        {"issues": [], "isLast": True},
+        {"issues": [{"key": "RHAISTRAT-9999"}], "isLast": False,
+         "nextPageToken": "more-results"},
+    ])
+    def test_existing_or_inconclusive_work_blocks_all_writes(
+            self, tmp_dir, submission_boundaries, page):
+        plan = self._plan()
+        with patch("jira_utils.api_call_with_retry", side_effect=[
+            {"accountId": "test-account", "active": True}, page,
+        ]):
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (0, 1)
+
+        self._assert_no_writes(submission_boundaries)
+        data, _ = read_frontmatter(plan[0]["path"])
+        assert not data.get("jira_key")
+
+    def test_failed_auth_blocks_even_partial_resume(
+            self, tmp_dir, submission_boundaries, capsys):
+        plan = self._plan(epic_count=2)
+        plan[0]["jira_key"] = "RHAI-9002"
+        failure = urllib.error.HTTPError("https://jira.example.com", 401,
+                                         "Unauthorized", {}, None)
+        with patch("jira_utils.api_call_with_retry", side_effect=failure):
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (0, 1)
+        self._assert_no_writes(submission_boundaries)
+        submission_boundaries[1].assert_not_called()
+        output = capsys.readouterr().err
+        assert "Submission blocked for RHAISTRAT-9999" in output
+        assert "No Jira writes were made for RHAISTRAT-9999 in this attempt." in output
+        assert "Preserve the original artifacts and recorded jira_key values" in output
+
+    @pytest.mark.parametrize("answer", [
+        None,
+        {"key": "RHAISTRAT-9000", "fields": {"issuelinks": []}},
+        {"key": "RHAISTRAT-9999", "fields": {}},
+        urllib.error.HTTPError("https://jira.example.com", 403,
+                               "Forbidden", {}, None),
+        BadStatusLine("invalid status"),
+        IncompleteRead(b"partial"),
+    ])
+    def test_unverified_strategy_blocks_all_writes(
+            self, tmp_dir, submission_boundaries, answer):
+        plan = self._plan()
+        if isinstance(answer, Exception):
+            submission_boundaries[1].side_effect = answer
+        else:
+            submission_boundaries[1].return_value = answer
+        with patch("submit.verify_jira_auth"):
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (0, 1)
+        self._assert_no_writes(submission_boundaries)
+
+    def test_verified_fresh_plan_creates_epic_and_records_key(
+            self, tmp_dir, submission_boundaries):
+        plan = self._plan()
+        with patch("jira_utils.api_call_with_retry", side_effect=[
+            {"accountId": "test-account", "active": True},
+            {"issues": [{"key": "RHAISTRAT-9999"}], "isLast": True},
+        ]):
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (1, 0)
+
+        submission_boundaries[0]["create_issue"].assert_called_once()
+        data, _ = read_frontmatter(plan[0]["path"])
+        assert data["jira_key"] == "RHAI-9003"
+
+    @pytest.mark.parametrize("issue_type,created", [("Epic", 0), ("Outcome", 1)])
+    def test_fresh_submission_uses_actual_type_of_incorporated_issue(
+            self, tmp_dir, submission_boundaries, issue_type, created):
+        plan = self._plan()
+        submission_boundaries[1].return_value["fields"]["issuelinks"] = [{
+            "type": {"name": "Incorporates"},
+            "outwardIssue": {"key": "RHAI-9002", "fields": {
+                "issuetype": {"name": issue_type},
+            }},
+        }]
+        responses = [{"accountId": "test-account", "active": True}]
+        if created:
+            responses.append({"issues": [{"key": "RHAISTRAT-9999"}], "isLast": True})
+        with patch("jira_utils.api_call_with_retry", side_effect=responses):
+            result = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False)
+        assert result == ((1, 0) if created else (0, 1))
+        if created:
+            submission_boundaries[0]["create_issue"].assert_called_once()
+        else:
+            self._assert_no_writes(submission_boundaries)
+
+    def test_unresolved_incorporated_issue_blocks_fresh_submission(
+            self, tmp_dir, submission_boundaries, capsys):
+        plan = self._plan()
+        submission_boundaries[1].return_value["fields"]["issuelinks"] = [{
+            "type": {"name": "Incorporates"}, "outwardIssue": {"key": "RHAI-9002"},
+        }]
+        with patch("submit.verify_jira_auth"), \
+             patch("jira_utils.get_issue", return_value={"fields": {}}) as lookup:
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (0, 1)
+        lookup.assert_called_once_with("s", "u", "t", "RHAI-9002", fields=["issuetype"])
+        self._assert_no_writes(submission_boundaries)
+        assert "RHAI-9002" in capsys.readouterr().err
+
+    def test_partial_resume_keeps_recorded_epic_and_creates_only_missing_one(
+            self, tmp_dir, submission_boundaries):
+        _setup_strategy(epic_count=2)
+        _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
+                "jira_key=RHAI-9002")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        with patch("jira_utils.api_call_with_retry", return_value={
+            "accountId": "test-account", "active": True,
+        }) as reads, patch("submit.has_existing_epics") as child_check:
+            assert submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False) == (1, 0)
+
+        reads.assert_called_once_with("s", "/myself", "u", "t")
+        child_check.assert_not_called()
+        submission_boundaries[0]["create_issue"].assert_called_once()
+        first, _ = read_frontmatter(plan[0]["path"])
+        second, _ = read_frontmatter(plan[1]["path"])
+        assert first["jira_key"] == "RHAI-9002"
+        assert second["jira_key"] == "RHAI-9003"
+
+    def test_dry_run_performs_no_jira_reads_or_writes(
+            self, tmp_dir, submission_boundaries):
+        plan = self._plan()
+        with patch("submit.verify_jira_auth") as auth, \
+             patch("submit.has_existing_epics") as child_check, \
+             patch("jira_utils.api_call_with_retry") as reads:
+            assert submit_module._submit_strategy(
+                None, None, None, "RHAISTRAT-9999", plan, True) == (1, 0)
+        auth.assert_not_called()
+        child_check.assert_not_called()
+        reads.assert_not_called()
+        submission_boundaries[1].assert_not_called()
+        self._assert_no_writes(submission_boundaries)
+
+    @pytest.mark.parametrize("result,reason,recovery", [
+        ({"issues": [], "isLast": True}, "empty or incomplete",
+         "retry the same submission with its checks enabled"),
+        ({"issues": [{"key": "RHAISTRAT-9999"}, {"key": "RHOAIENG-9002"}],
+          "isLast": True}, "already has linked epics",
+         "Review the existing epics instead of submitting a fresh breakdown"),
+    ])
+    def test_cli_explains_why_submission_is_blocked_and_how_to_recover(
+            self, tmp_dir, submission_boundaries, capsys, result, reason, recovery):
+        self._plan()
+        with patch.object(sys, "argv", [SCRIPT, "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 result,
+             ]):
+            with pytest.raises(SystemExit) as failure:
+                submit_module.main()
+        assert failure.value.code == 1
+        self._assert_no_writes(submission_boundaries)
+        output = capsys.readouterr().err
+        assert "Submission blocked for RHAISTRAT-9999" in output
+        assert reason in output
+        assert "No Jira writes were made for RHAISTRAT-9999 in this attempt." in output
+        assert recovery in output
+        assert "original artifacts" in output
+        assert "recorded jira_key values" in output
+
+    def test_failure_message_does_not_deny_writes_for_an_earlier_strategy(
+            self, tmp_dir, submission_boundaries, capsys):
+        _setup_strategy("RHAISTRAT-9998", epic_count=1)
+        self._plan()
+        submission_boundaries[1].side_effect = lambda server, user, token, key, **kwargs: {
+            "key": key, "fields": {"issuelinks": [], "assignee": None},
+        }
+        auth_error = urllib.error.HTTPError("https://jira.example.com", 401,
+                                            "Unauthorized", {}, None)
+        with patch.object(sys, "argv", [SCRIPT, "RHAISTRAT-9998", "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 {"issues": [{"key": "RHAISTRAT-9998"}], "isLast": True},
+                 auth_error,
+             ]):
+            with pytest.raises(SystemExit) as failure:
+                submit_module.main()
+
+        assert failure.value.code == 1
+        submission_boundaries[0]["create_issue"].assert_called_once()
+        output = capsys.readouterr()
+        assert "1 epics created" in output.out
+        assert "No Jira writes were made for RHAISTRAT-9999 in this attempt." in output.err
+        assert "No Jira writes were made for RHAISTRAT-9998" not in output.err
+        assert "HTTP 401" in output.err
 
 
 class TestDryRun:

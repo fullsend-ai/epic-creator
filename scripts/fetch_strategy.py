@@ -9,12 +9,13 @@ Usage:
 import http.client
 import os
 import sys
+import tempfile
 import urllib.error
-import urllib.parse
 
 sys.path.insert(0, os.path.dirname(__file__))
-from jira_utils import (require_env, get_issue, api_call_with_retry,
-                        adf_to_markdown, download_attachment)
+from jira_utils import (JiraReadError, require_env, get_issue, verify_jira_auth,
+                        search_issues_page, has_existing_epics as _has_existing_epics,
+                        adf_to_markdown, download_attachment, safe_error_message)
 
 import re
 import yaml
@@ -124,64 +125,21 @@ def _search_issues(server, user, token, jql, limit=100):
     all_issues = []
     fields = "summary,description,labels,issuelinks,status,priority,attachment"
     next_page_token = None
+    seen_tokens = set()
 
     while len(all_issues) < limit:
         batch_size = min(50, limit - len(all_issues))
-        path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-                f"&maxResults={batch_size}&fields={fields}")
-        if next_page_token:
-            path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
-        data = api_call_with_retry(server, path, user, token)
-
-        issues = data.get("issues", [])
-        if not issues:
-            break
-
+        issues, next_page_token = search_issues_page(
+            server, user, token, jql, max_results=batch_size, fields=fields,
+            next_page_token=next_page_token)
         all_issues.extend(issues)
-
-        if data.get("isLast", True):
+        if next_page_token is None:
             break
-        next_page_token = data.get("nextPageToken")
-        if not next_page_token:
-            break
+        if not issues or next_page_token in seen_tokens:
+            raise JiraReadError("Jira strategy search did not make pagination progress.")
+        seen_tokens.add(next_page_token)
 
     return all_issues
-
-
-def _issue_type_name(issue):
-    """Read the issue type from either a linked issue or a full issue response."""
-    fields = issue.get("fields") or {}
-    issue_type = fields.get("issuetype") or {}
-    return issue_type.get("name")
-
-
-def _has_existing_epics(issue, server, user, token):
-    """Check for child epics or outgoing Incorporates links to actual epics."""
-    # Legacy check for pre-parent-field epics that used Incorporates links
-    for link in issue.get("fields", {}).get("issuelinks", []):
-        if link.get("type", {}).get("name") != "Incorporates":
-            continue
-        linked_issue = link.get("outwardIssue")
-        if not linked_issue:
-            continue
-
-        linked_key = linked_issue["key"]
-        issue_type = _issue_type_name(linked_issue)
-        if not issue_type:
-            full_issue = get_issue(server, user, token, linked_key,
-                                   fields=["issuetype"])
-            issue_type = _issue_type_name(full_issue or {})
-        if not issue_type:
-            raise ValueError(f"Cannot determine issue type for {linked_key} "
-                             f"incorporated by {issue['key']}")
-        if issue_type == "Epic":
-            return True
-    key = issue["key"]
-    jql = f"parent = {key} AND issuetype = Epic"
-    path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-            f"&maxResults=1&fields=key")
-    data = api_call_with_retry(server, path, user, token)
-    return bool(data.get("issues"))
 
 
 def cmd_fetch(args):
@@ -197,15 +155,20 @@ def cmd_fetch(args):
     parser.add_argument("--data-dir", help="Data directory (unused, for compat)")
     opts = parser.parse_args(args)
 
+    # A failed fetch must not leave IDs from an earlier run available to use.
+    try:
+        os.unlink(opts.ids_file)
+    except FileNotFoundError:
+        pass
+
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("ERROR: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set",
-              file=sys.stderr)
-        sys.exit(1)
+        raise JiraReadError("JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set.")
 
+    verify_jira_auth(server, user, token)
     issues = _search_issues(server, user, token, opts.jql, opts.limit)
 
-    all_keys = []
+    selected = []
     skipped = 0
     failed_checks = 0
     for issue in issues:
@@ -213,37 +176,50 @@ def cmd_fetch(args):
         if opts.skip_if_has_epics:
             try:
                 has_epics = _has_existing_epics(issue, server, user, token)
-            except (ValueError, OSError, http.client.HTTPException) as e:
-                print(f"WARNING: Skipped {key}: could not check existing epics: {e}",
-                      file=sys.stderr)
+            except (JiraReadError, ValueError, OSError, http.client.HTTPException) as e:
+                print(f"WARNING: Skipped {key}: could not check existing epics: "
+                      f"{safe_error_message(e)}", file=sys.stderr)
                 failed_checks += 1
                 continue
             if has_epics:
-                print(f"Skipped {key}: already has linked epics",
-                      file=sys.stderr)
+                print(f"Skipped {key}: already has linked epics", file=sys.stderr)
                 skipped += 1
                 continue
-        _write_strategy(issue, server=server, user=user, token=token)
-        all_keys.append(key)
-        print(f"Fetched {key}: {issue['fields'].get('summary', '')[:60]}",
-              file=sys.stderr)
-
-    os.makedirs(os.path.dirname(opts.ids_file) or "tmp", exist_ok=True)
-    with open(opts.ids_file, "w") as f:
-        for key in all_keys:
-            f.write(f"{key}\n")
+        selected.append(issue)
 
     if skipped:
-        print(f"Skipped {skipped} strategies with existing epics",
-              file=sys.stderr)
+        print(f"Skipped {skipped} strategies with existing epics", file=sys.stderr)
     if failed_checks:
         print(f"Skipped {failed_checks} strategies because existing epics "
               "could not be checked", file=sys.stderr)
-    print(f"Fetched {len(all_keys)} strategies", file=sys.stderr)
-    if failed_checks and not all_keys:
-        print("ERROR: No strategies fetched and some existing-epic checks failed",
+        if not selected:
+            raise JiraReadError(
+                "No strategies fetched and some existing-epic checks failed.")
+
+    # Complete all skip checks before writing any new strategy inputs or IDs.
+    for issue in selected:
+        key = issue["key"]
+        _write_strategy(issue, server=server, user=user, token=token)
+        print(f"Fetched {key}: {issue['fields'].get('summary', '')[:60]}",
               file=sys.stderr)
-        sys.exit(1)
+
+    ids_dir = os.path.dirname(opts.ids_file) or "."
+    os.makedirs(ids_dir, exist_ok=True)
+    ids_tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=ids_dir,
+                                         prefix=".strategy-ids-", delete=False) as f:
+            ids_tmp = f.name
+            for issue in selected:
+                f.write(f"{issue['key']}\n")
+        os.replace(ids_tmp, opts.ids_file)
+    finally:
+        if ids_tmp is not None and os.path.exists(ids_tmp):
+            os.unlink(ids_tmp)
+
+    print(f"Fetched {len(selected)} strategies", file=sys.stderr)
+    if not selected:
+        print("No work to decompose.", file=sys.stderr)
 
 
 def cmd_fetch_one(args):
@@ -253,12 +229,10 @@ def cmd_fetch_one(args):
     key = args[0]
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("ERROR: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set",
-              file=sys.stderr)
-        sys.exit(1)
+        raise JiraReadError("JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set.")
     issue = _fetch_issue(server, user, token, key)
     if not issue:
-        sys.exit(1)
+        raise JiraReadError(f"Jira did not return strategy {key}.")
     path = _write_strategy(issue, server=server, user=user, token=token)
     print(path)
 
@@ -272,4 +246,14 @@ if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(f"Commands: {', '.join(COMMANDS)}", file=sys.stderr)
         sys.exit(1)
-    COMMANDS[sys.argv[1]](sys.argv[2:])
+    try:
+        COMMANDS[sys.argv[1]](sys.argv[2:])
+    except (JiraReadError, OSError, ValueError, http.client.HTTPException) as e:
+        print(f"ERROR: Fetch failed: {safe_error_message(e)}", file=sys.stderr)
+        if sys.argv[1] == "fetch":
+            print("Fetch aborted; no IDs file published.", file=sys.stderr)
+        print("Stop this run and report the failure. Check Jira access and the "
+              "reported error, then retry the same command with its checks enabled.\n"
+              "Do not continue with saved IDs or strategy artifacts.",
+              file=sys.stderr)
+        sys.exit(1)

@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Tests for scripts/fetch_strategy.py — strategy fetching and attachment handling."""
+import errno
 import io
 import os
+import runpy
 import sys
 import urllib.error
 from http.client import BadStatusLine, HTTPResponse, IncompleteRead, RemoteDisconnected
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from fetch_strategy import (_find_strategy_attachment, _has_existing_epics,
-                            _write_strategy)
+from fetch_strategy import (_find_strategy_attachment, _search_issues,
+                            _write_strategy, cmd_fetch, cmd_fetch_one)
+from jira_utils import JiraReadError, safe_error_message
 
 
 class TestFindStrategyAttachment:
@@ -244,134 +248,6 @@ class TestDownloadAttachmentValidation:
         assert mock_open.call_count == 2
 
 
-class TestHasExistingEpics:
-    """Tests for _has_existing_epics — checks Incorporates links and child items."""
-
-    def _make_issue(self, key="RHAISTRAT-1234", links=None):
-        return {
-            "key": key,
-            "fields": {"issuelinks": links or []},
-        }
-
-    def _incorporates_link(self, issue_type="Epic"):
-        return {
-            "type": {"name": "Incorporates", "outward": "incorporates"},
-            "outwardIssue": {
-                "key": "RHAI-100",
-                "fields": {"issuetype": {"name": issue_type}},
-            },
-        }
-
-    def test_returns_true_for_incorporated_epic(self):
-        issue = self._make_issue(links=[self._incorporates_link()])
-        result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is True
-
-    @pytest.mark.parametrize("issue_type", ["Outcome", "Feature", "Task"])
-    def test_does_not_skip_for_incorporated_non_epic(self, issue_type):
-        issue = self._make_issue(links=[self._incorporates_link(issue_type)])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": []}) as mock_api, \
-             patch("fetch_strategy.get_issue") as mock_get:
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is False
-        mock_api.assert_called_once_with(
-            "s", "/search/jql?jql=parent%20%3D%20RHAISTRAT-1234%20AND%20"
-            "issuetype%20%3D%20Epic&maxResults=1&fields=key", "u", "t")
-        mock_get.assert_not_called()
-
-    def test_checks_later_links_for_epics(self):
-        issue = self._make_issue(links=[self._incorporates_link("Outcome"),
-                                      self._incorporates_link("Epic")])
-        assert _has_existing_epics(issue, "s", "u", "t") is True
-
-    def test_checks_child_epics_after_non_epic_link(self):
-        issue = self._make_issue(links=[self._incorporates_link("Outcome")])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": [{"key": "RHOAIENG-100"}]}):
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is True
-
-    def test_returns_true_for_child_epics(self):
-        issue = self._make_issue(links=[])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": [{"key": "RHOAIENG-100"}]}):
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is True
-
-    def test_returns_false_when_no_epics(self):
-        issue = self._make_issue(links=[])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": []}):
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is False
-
-    def test_skips_api_calls_when_incorporated_epic_found(self):
-        issue = self._make_issue(links=[self._incorporates_link()])
-        with patch("fetch_strategy.api_call_with_retry") as mock_api, \
-             patch("fetch_strategy.get_issue") as mock_get:
-            _has_existing_epics(issue, "s", "u", "t")
-        mock_api.assert_not_called()
-        mock_get.assert_not_called()
-
-    @pytest.mark.parametrize("issue_type, expected", [("Epic", True),
-                                                      ("Outcome", False)])
-    @pytest.mark.parametrize("fields", [{}, {"issuetype": None}])
-    def test_fetches_missing_linked_issue_type(self, issue_type, expected,
-                                             fields):
-        link = self._incorporates_link()
-        link["outwardIssue"]["fields"] = fields
-        issue = self._make_issue(links=[link])
-        with patch("fetch_strategy.get_issue", return_value={
-            "fields": {"issuetype": {"name": issue_type}},
-        }) as mock_get, \
-             patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": []}) as mock_api:
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is expected
-        mock_get.assert_called_once_with("s", "u", "t", "RHAI-100",
-                                         fields=["issuetype"])
-        assert mock_api.call_count == (0 if expected else 1)
-
-    def test_reports_unresolved_linked_issue_type(self):
-        link = self._incorporates_link()
-        del link["outwardIssue"]["fields"]
-        issue = self._make_issue(links=[link])
-        with patch("fetch_strategy.get_issue", return_value={"fields": {}}), \
-             pytest.raises(ValueError, match="RHAI-100.*RHAISTRAT-1234"):
-            _has_existing_epics(issue, "s", "u", "t")
-
-    def test_propagates_linked_issue_lookup_failure(self):
-        link = self._incorporates_link()
-        del link["outwardIssue"]["fields"]
-        issue = self._make_issue(links=[link])
-        with patch("fetch_strategy.get_issue", side_effect=urllib.error.URLError(
-            "lookup failed")), pytest.raises(urllib.error.URLError):
-            _has_existing_epics(issue, "s", "u", "t")
-
-    def test_ignores_incoming_incorporates_link(self):
-        link = self._incorporates_link()
-        link["inwardIssue"] = link.pop("outwardIssue")
-        issue = self._make_issue(links=[link])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": []}), \
-             patch("fetch_strategy.get_issue") as mock_get:
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is False
-        mock_get.assert_not_called()
-
-    def test_ignores_non_incorporates_links(self):
-        issue = self._make_issue(links=[{
-            "type": {"name": "Blocks", "outward": "blocks"},
-            "outwardIssue": {"key": "RHAI-200"},
-        }])
-        with patch("fetch_strategy.api_call_with_retry",
-                   return_value={"issues": []}) as mock_api:
-            result = _has_existing_epics(issue, "s", "u", "t")
-        assert result is False
-        mock_api.assert_called_once()
-
-
 class TestSkipIfHasEpicsFlag:
     """Tests for --skip-if-has-epics flag in cmd_fetch."""
 
@@ -389,6 +265,11 @@ class TestSkipIfHasEpicsFlag:
             for i in range(1, count + 1)
         ]
 
+    @staticmethod
+    def _no_child_epics(server, path, user, token):
+        key = parse_qs(urlsplit(path).query)["jql"][0].split()[2]
+        return {"issues": [{"key": key}], "isLast": True}
+
     def test_skips_strategies_with_epics(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         issues = self._make_issues(3)
@@ -399,6 +280,7 @@ class TestSkipIfHasEpicsFlag:
         ids_file = str(tmp_path / "ids.txt")
         with patch("fetch_strategy.require_env",
                    return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues",
                    return_value=issues), \
              patch("fetch_strategy._has_existing_epics",
@@ -426,9 +308,11 @@ class TestSkipIfHasEpicsFlag:
 
         ids_file = tmp_path / "ids.txt"
         with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues", return_value=issues), \
-             patch("fetch_strategy.api_call_with_retry", side_effect=[
-                 {"issues": []}, {"issues": [{"key": "RHOAIENG-100"}]},
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"issues": [{"key": "RHAISTRAT-1"}], "isLast": True},
+                 {"issues": [{"key": "RHOAIENG-100"}], "isLast": True},
              ]):
             from fetch_strategy import cmd_fetch
             cmd_fetch(["some jql", "--ids-file", str(ids_file),
@@ -474,9 +358,10 @@ class TestSkipIfHasEpicsFlag:
 
         ids_file = tmp_path / "ids.txt"
         with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues", return_value=issues), \
-             patch("fetch_strategy.get_issue", side_effect=[lookup_result]), \
-             patch("fetch_strategy.api_call_with_retry", return_value={"issues": []}):
+             patch("jira_utils.get_issue", side_effect=[lookup_result]), \
+             patch("jira_utils.api_call_with_retry", side_effect=self._no_child_epics):
             from fetch_strategy import cmd_fetch
             cmd_fetch(["some jql", "--ids-file", str(ids_file),
                        "--skip-if-has-epics"])
@@ -488,7 +373,7 @@ class TestSkipIfHasEpicsFlag:
         ]
         stderr = capsys.readouterr().err
         assert "WARNING: Skipped RHAISTRAT-2: could not check existing epics:" in stderr
-        reason = (str(lookup_result) if isinstance(lookup_result, Exception)
+        reason = (safe_error_message(lookup_result) if isinstance(lookup_result, Exception)
                   else "Cannot determine issue type for RHAI-100")
         assert reason in stderr
         assert "Skipped 1 strategies with existing epics" in stderr
@@ -504,9 +389,11 @@ class TestSkipIfHasEpicsFlag:
         monkeypatch.chdir(tmp_path)
         ids_file = tmp_path / "ids.txt"
         with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues", return_value=self._make_issues(3)), \
-             patch("fetch_strategy.api_call_with_retry", side_effect=[
-                 {"issues": []}, error, {"issues": []},
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"issues": [{"key": "RHAISTRAT-1"}], "isLast": True}, error,
+                 {"issues": [{"key": "RHAISTRAT-3"}], "isLast": True},
              ]):
             from fetch_strategy import cmd_fetch
             cmd_fetch(["some jql", "--ids-file", str(ids_file),
@@ -519,7 +406,7 @@ class TestSkipIfHasEpicsFlag:
         ]
         stderr = capsys.readouterr().err
         assert "WARNING: Skipped RHAISTRAT-2: could not check existing epics:" in stderr
-        assert str(error) in stderr
+        assert safe_error_message(error) in stderr
         assert "Fetched 2 strategies" in stderr
 
     @pytest.mark.parametrize("check_results, expected_exit", [
@@ -528,12 +415,12 @@ class TestSkipIfHasEpicsFlag:
             urllib.error.URLError("lookup failed"),
         ], 1, id="all-checks-failed"),
         pytest.param([
-            {"issues": [{"key": "RHAI-100"}]},
+            {"issues": [{"key": "RHAI-100"}], "isLast": True},
             urllib.error.URLError("lookup failed"),
         ], 1, id="existing-epics-and-failed-check"),
         pytest.param([
-            {"issues": [{"key": "RHAI-100"}]},
-            {"issues": [{"key": "RHAI-101"}]},
+            {"issues": [{"key": "RHAI-100"}], "isLast": True},
+            {"issues": [{"key": "RHAI-101"}], "isLast": True},
         ], 0, id="all-have-epics"),
         pytest.param([], 0, id="no-matching-strategies"),
     ])
@@ -543,25 +430,26 @@ class TestSkipIfHasEpicsFlag:
         ids_file = tmp_path / "ids.txt"
         ids_file.write_text("RHAISTRAT-9999\n")
         with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues",
                    return_value=self._make_issues(len(check_results))), \
-             patch("fetch_strategy.api_call_with_retry",
+             patch("jira_utils.api_call_with_retry",
                    side_effect=check_results):
             from fetch_strategy import cmd_fetch
             args = ["some jql", "--ids-file", str(ids_file), "--skip-if-has-epics"]
             if expected_exit:
-                with pytest.raises(SystemExit) as exc_info:
+                with pytest.raises(JiraReadError, match="No strategies fetched"):
                     cmd_fetch(args)
-                assert exc_info.value.code == expected_exit
             else:
                 cmd_fetch(args)
 
-        assert ids_file.read_text() == ""
+        if expected_exit:
+            assert not ids_file.exists()
+        else:
+            assert ids_file.read_text() == ""
         assert not (tmp_path / "artifacts" / "strat-tasks").exists()
         stderr = capsys.readouterr().err
-        error_message = "ERROR: No strategies fetched and some existing-epic checks failed"
         if expected_exit:
-            assert error_message in stderr
             failed_checks = sum(isinstance(result, Exception) for result in check_results)
             assert (f"Skipped {failed_checks} strategies because existing epics "
                     "could not be checked") in stderr
@@ -575,6 +463,7 @@ class TestSkipIfHasEpicsFlag:
         ids_file = str(tmp_path / "ids.txt")
         with patch("fetch_strategy.require_env",
                    return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
              patch("fetch_strategy._search_issues",
                    return_value=issues):
             from fetch_strategy import cmd_fetch
@@ -583,3 +472,216 @@ class TestSkipIfHasEpicsFlag:
         with open(ids_file) as f:
             ids = f.read().strip().split("\n")
         assert ids == ["RHAISTRAT-1", "RHAISTRAT-2"]
+
+
+class TestFetchSafety:
+    def _issue(self, key="RHAISTRAT-9001"):
+        return {"key": key, "fields": {
+            "summary": "Strategy", "description": "Scoped work",
+            "labels": [], "issuelinks": [], "attachment": [],
+        }}
+
+    def test_authenticated_empty_batch_replaces_stale_ids(self, tmp_path, capsys):
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAISTRAT-9000\n")
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 {"issues": [], "isLast": True},
+             ]), patch("fetch_strategy._write_strategy") as write_strategy:
+            cmd_fetch(["some jql", "--ids-file", str(ids_file)])
+
+        assert ids_file.read_text() == ""
+        write_strategy.assert_not_called()
+        assert "No work to decompose." in capsys.readouterr().err
+
+    def test_expired_auth_removes_stale_ids_before_search(self, tmp_path):
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAISTRAT-9000\n")
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth",
+                   side_effect=JiraReadError("authentication failed")), \
+             patch("fetch_strategy._search_issues") as search:
+            with pytest.raises(JiraReadError, match="authentication"):
+                cmd_fetch(["some jql", "--ids-file", str(ids_file)])
+
+        assert not ids_file.exists()
+        search.assert_not_called()
+
+    def test_missing_credentials_also_invalidate_old_ids(self, tmp_path):
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAISTRAT-9000\n")
+        with patch("fetch_strategy.require_env", return_value=("s", "u", None)):
+            with pytest.raises(JiraReadError, match="JIRA_TOKEN must be set"):
+                cmd_fetch(["some jql", "--ids-file", str(ids_file)])
+        assert not ids_file.exists()
+
+    def test_false_empty_child_check_publishes_only_verified_strategy(self, tmp_path, capsys):
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAISTRAT-9000\n")
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 {"issues": [self._issue(), self._issue("RHAISTRAT-9002")],
+                  "isLast": True},
+                 {"issues": [{"key": "RHAISTRAT-9001"}], "isLast": True},
+                 {"issues": [], "isLast": True},
+             ]), patch("fetch_strategy._write_strategy") as write_strategy:
+            cmd_fetch(["some jql", "--ids-file", str(ids_file),
+                       "--skip-if-has-epics"])
+
+        assert ids_file.read_text().splitlines() == ["RHAISTRAT-9001"]
+        write_strategy.assert_called_once_with(self._issue(), server="s", user="u", token="t")
+        stderr = capsys.readouterr().err
+        assert "WARNING: Skipped RHAISTRAT-9002" in stderr
+        assert "empty or incomplete" in stderr
+
+    def test_failed_ids_publication_leaves_no_partial_file(self, tmp_path):
+        ids_file = tmp_path / "ids.txt"
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("fetch_strategy.verify_jira_auth"), \
+             patch("fetch_strategy._search_issues", return_value=[self._issue()]), \
+             patch("fetch_strategy._write_strategy"), \
+             patch("fetch_strategy.os.replace", side_effect=OSError("write failed")):
+            with pytest.raises(OSError):
+                cmd_fetch(["some jql", "--ids-file", str(ids_file)])
+
+        assert not ids_file.exists()
+        assert not list(tmp_path.glob(".strategy-ids-*"))
+
+    def test_fetch_one_reads_issue_without_redundant_auth_request(self, capsys):
+        with patch("fetch_strategy.require_env", return_value=("s", "u", "t")), \
+             patch("jira_utils.api_call_with_retry", return_value=self._issue()) as read, \
+             patch("fetch_strategy._write_strategy", return_value="strategy.md"):
+            cmd_fetch_one(["RHAISTRAT-9001"])
+
+        read.assert_called_once()
+        assert read.call_args.args[1].startswith("/issue/RHAISTRAT-9001?")
+        assert capsys.readouterr().out.strip() == "strategy.md"
+
+    @pytest.mark.parametrize("command", ["fetch", "fetch-one"])
+    def test_cli_reports_auth_failure_and_recovery(
+            self, tmp_path, monkeypatch, capsys, command):
+        monkeypatch.chdir(tmp_path)
+        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "fetch_strategy.py")
+        args = (["project = RHAISTRAT", "--ids-file", "ids.txt"]
+                if command == "fetch" else ["RHAISTRAT-9001"])
+        error = urllib.error.HTTPError("https://jira.example.com", 401,
+                                       "private-response test-token", {}, None)
+        with patch.dict(os.environ, {"JIRA_SERVER": "https://jira.example.com",
+                                    "JIRA_USER": "bot@example.com", "JIRA_TOKEN": "test-token"}), \
+             patch.object(sys, "argv", [script, command, *args]), \
+             patch("urllib.request.urlopen", side_effect=error) as request:
+            with pytest.raises(SystemExit) as failure:
+                runpy.run_path(script, run_name="__main__")
+
+        assert failure.value.code == 1
+        output = capsys.readouterr().err
+        assert "HTTP 401" in output
+        assert "Stop this run and report the failure." in output
+        assert "Check Jira access" in output
+        assert "retry the same command with its checks enabled" in output
+        assert "Do not continue with saved IDs or strategy artifacts." in output
+        assert ("no IDs file published" in output) == (command == "fetch")
+        assert "test-token" not in output
+        assert "private-response" not in output
+        assert not (tmp_path / "ids.txt").exists()
+        assert not (tmp_path / "artifacts").exists()
+        request.assert_called_once()
+
+    def test_cli_identifies_failed_child_check_and_blocks_saved_inputs(
+            self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "ids.txt").write_text("RHAISTRAT-9000\n")
+        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "fetch_strategy.py")
+        with patch("jira_utils.require_env", return_value=("s", "u", "t")), \
+             patch.object(sys, "argv", [script, "fetch", "project = RHAISTRAT",
+                                        "--ids-file", "ids.txt", "--skip-if-has-epics"]), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 {"issues": [self._issue()], "isLast": True},
+                 {"issues": [], "isLast": True},
+             ]):
+            with pytest.raises(SystemExit) as failure:
+                runpy.run_path(script, run_name="__main__")
+
+        assert failure.value.code == 1
+        output = capsys.readouterr().err
+        assert "Existing-epic search for RHAISTRAT-9001 was empty or incomplete" in output
+        assert "expected the known strategy alone in a complete result" in output
+        assert "Fetch aborted; no IDs file published." in output
+        assert "retry the same command with its checks enabled" in output
+        assert "Do not continue with saved IDs or strategy artifacts." in output
+        assert not (tmp_path / "ids.txt").exists()
+        assert not (tmp_path / "artifacts").exists()
+
+    def test_cli_reports_failed_publication_without_reusing_ids(
+            self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "fetch_strategy.py")
+        with patch("jira_utils.require_env", return_value=("s", "u", "t")), \
+             patch.object(sys, "argv", [script, "fetch", "project = RHAISTRAT",
+                                        "--ids-file", "ids.txt"]), \
+             patch("jira_utils.api_call_with_retry", side_effect=[
+                 {"accountId": "test-account", "active": True},
+                 {"issues": [], "isLast": True},
+             ]), patch("os.replace", side_effect=PermissionError(
+                 errno.EACCES, "private-write-detail test-token", str(tmp_path / "ids.txt"))):
+            with pytest.raises(SystemExit) as failure:
+                runpy.run_path(script, run_name="__main__")
+
+        assert failure.value.code == 1
+        output = capsys.readouterr().err
+        assert "Permission denied (EACCES)" in output
+        assert "private-write-detail" not in output
+        assert "test-token" not in output
+        assert "Fetch aborted; no IDs file published." in output
+        assert "Stop this run and report the failure." in output
+        assert not (tmp_path / "ids.txt").exists()
+        assert not list(tmp_path.glob(".strategy-ids-*"))
+
+    @pytest.mark.parametrize("server", [
+        "http://bot:test-token@jira.example.com",
+        "https://[malformed-test-token",
+    ])
+    def test_cli_explains_invalid_server_without_echoing_it(
+            self, tmp_path, monkeypatch, capsys, server):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "ids.txt").write_text("RHAISTRAT-9000\n")
+        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "fetch_strategy.py")
+        with patch.dict(os.environ, {"JIRA_SERVER": server,
+                                    "JIRA_USER": "bot@example.com", "JIRA_TOKEN": "test-token"}), \
+             patch.object(sys, "argv", [script, "fetch", "project = RHAISTRAT",
+                                        "--ids-file", "ids.txt"]), \
+             patch("urllib.request.urlopen") as request:
+            with pytest.raises(SystemExit) as failure:
+                runpy.run_path(script, run_name="__main__")
+
+        assert failure.value.code == 1
+        output = capsys.readouterr().err
+        assert "JIRA_SERVER must be a valid HTTPS URL." in output
+        assert "test-token" not in output
+        assert server not in output
+        assert "Fetch aborted; no IDs file published." in output
+        assert "Stop this run and report the failure." in output
+        assert not (tmp_path / "ids.txt").exists()
+        request.assert_not_called()
+
+
+class TestStrategySearchPagination:
+    def test_reads_all_pages(self):
+        first, second = {"key": "RHAISTRAT-9001"}, {"key": "RHAISTRAT-9002"}
+        with patch("fetch_strategy.search_issues_page",
+                   side_effect=[([first], "next-page"), ([second], None)]) as search:
+            assert _search_issues("s", "u", "t", "some jql") == [first, second]
+        assert search.call_args_list[1].kwargs["next_page_token"] == "next-page"
+
+    @pytest.mark.parametrize("pages", [
+        [([], "next-page")],
+        [([{"key": "RHAISTRAT-9001"}], "same-page"),
+         ([{"key": "RHAISTRAT-9002"}], "same-page")],
+    ])
+    def test_rejects_search_that_does_not_progress(self, pages):
+        with patch("fetch_strategy.search_issues_page", side_effect=pages):
+            with pytest.raises(JiraReadError, match="pagination progress"):
+                _search_issues("s", "u", "t", "some jql")

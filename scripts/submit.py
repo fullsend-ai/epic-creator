@@ -22,6 +22,7 @@ Environment variables:
 
 import argparse
 import glob
+import http.client
 import os
 import re
 import sys
@@ -39,7 +40,11 @@ from artifact_utils import (
     ValidationError,
 )
 from jira_utils import (
+    JiraReadError,
+    safe_error_message,
     require_env,
+    verify_jira_auth,
+    has_existing_epics,
     add_attachment,
     api_call,
     create_issue,
@@ -576,6 +581,34 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         print("  [DRY RUN] Would attach frontmatter to each epic")
         print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
         return len(pending), 0
+
+    failure = None
+    recovery = (
+        "Check Jira credentials and access, then retry the same submission with "
+        "its checks enabled. Preserve the original artifacts and recorded "
+        "jira_key values for partial resumes.")
+    try:
+        verify_jira_auth(server, user, token)
+        # A fresh breakdown must still be eligible at the actual write boundary.
+        # Recorded keys identify partial submissions that this script can resume.
+        if not any(entry["jira_key"] for entry in plan):
+            strategy = get_issue(server, user, token, strat_id,
+                                 fields=["issuelinks"])
+            if not isinstance(strategy, dict) or strategy.get("key") != strat_id:
+                raise JiraReadError("Jira did not return the requested strategy.")
+            if has_existing_epics(strategy, server, user, token):
+                failure = "Strategy already has linked epics."
+                recovery = (
+                    "Review the existing epics instead of submitting a fresh "
+                    "breakdown. To resume a partial submission, use its original "
+                    "artifacts with the recorded jira_key values.")
+    except (JiraReadError, OSError, ValueError, http.client.HTTPException) as e:
+        failure = safe_error_message(e)
+    if failure:
+        print(f"  ERROR: Submission blocked for {strat_id}: {failure}", file=sys.stderr)
+        print(f"  No Jira writes were made for {strat_id} in this attempt.\n"
+              f"  Report the failure. {recovery}", file=sys.stderr)
+        return 0, 1
 
     # Fetch strategy assignee to propagate to epics
     assignee_id = _get_strat_assignee(server, user, token, strat_id)
