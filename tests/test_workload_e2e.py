@@ -68,6 +68,8 @@ class LocalJira:
         path = parsed.path.removeprefix("/rest/api/3")
         body = json.loads(raw) if raw and "application/json" in headers.get("Content-Type", "") else None
         self.requests.append({"method": method, "path": parsed.path, "body": deepcopy(body)})
+        if method == "GET" and path == "/myself":
+            return {"accountId": "synthetic-account", "active": True}
         if method == "GET" and path.startswith("/attachment/"):
             return self.contents[path.rsplit("/", 1)[-1]].encode()
         if method == "GET" and path.startswith("/project/"):
@@ -465,6 +467,7 @@ def test_cli_intake_uses_newest_exact_attachment_and_rejects_fallback(workspace)
     w = workspace
     w.cli("fetch_strategy", "fetch", "project = RHOAIENG", "--ids-file", "tmp/discovered.txt",
           "--skip-if-processed", "--workload", w.workload_id)
+    assert w.jira.requests[0]["path"] == "/rest/api/3/myself"
     assert (w.path / "tmp/discovered.txt").read_text().strip() == w.key
     assert w.metadata(f"artifacts/strat-tasks/{w.key}.md")["attachment_id"] == "2"
     assert not any(r["path"] == "/attachment/1" for r in w.jira.requests)

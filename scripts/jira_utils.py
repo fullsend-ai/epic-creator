@@ -9,6 +9,8 @@ Environment variables:
 """
 
 import base64
+import errno
+import http.client
 import json
 import os
 import re
@@ -17,7 +19,33 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
+
+
+class JiraReadError(RuntimeError):
+    """A Jira read could not safely establish whether work may proceed."""
+
+
+class JiraConfigError(ValueError):
+    """Invalid Jira configuration with a safe, actionable explanation."""
+
+
+def safe_error_message(error):
+    """Describe known failures without exposing URLs or raw exception payloads."""
+    if isinstance(error, (JiraReadError, JiraConfigError)):
+        return str(error)
+    if isinstance(error, urllib.error.HTTPError):
+        return f"HTTP {error.code}"
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        cause = type(reason).__name__ if isinstance(reason, Exception) else "unknown cause"
+        return f"Network error ({cause})"
+    if isinstance(error, json.JSONDecodeError):
+        return "Invalid JSON response"
+    if (isinstance(error, OSError) and isinstance(error.errno, int)
+            and error.errno in errno.errorcode):
+        return f"{os.strerror(error.errno)} ({errno.errorcode[error.errno]})"
+    return type(error).__name__
 
 
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
@@ -74,7 +102,7 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
             raise
         except urllib.error.URLError as e:
             wait = 4 ** attempt
-            print(f"  Network error: {e.reason}, retrying in {wait}s...",
+            print(f"  {safe_error_message(e)}, retrying in {wait}s...",
                   file=sys.stderr)
             time.sleep(wait)
             last_error = e
@@ -83,10 +111,13 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
 
 def _validate_server_url(server):
     """Enforce HTTPS scheme to prevent credential leakage (CWE-319)."""
-    parsed = urlparse(server)
+    message = "JIRA_SERVER must be a valid HTTPS URL."
+    try:
+        parsed = urlparse(server)
+    except ValueError:
+        raise JiraConfigError(message) from None
     if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError(
-            f"JIRA_SERVER must be an HTTPS URL, got: {server!r}")
+        raise JiraConfigError(message)
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
 
 
@@ -101,6 +132,116 @@ def require_env():
 
 
 # ─── Jira Operations ─────────────────────────────────────────────────────────
+
+def _guarded_read(server, path, user, token, operation):
+    """Read JSON without including credentials or response bodies in errors."""
+    try:
+        return api_call_with_retry(server, path, user, token)
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        raise JiraReadError(
+            f"{operation} failed: {safe_error_message(e)}.") from None
+
+
+def verify_jira_auth(server, user, token):
+    """Require an active Jira identity; search itself permits anonymous access."""
+    identity = _guarded_read(server, "/myself", user, token,
+                             "Jira authentication check")
+    if (not isinstance(identity, dict)
+            or not isinstance(identity.get("accountId"), str)
+            or not identity["accountId"].strip()
+            or identity.get("active") is not True):
+        raise JiraReadError(
+            "Jira authentication check returned no active user identity.")
+    return identity["accountId"]
+
+
+def search_issues_page(server, user, token, jql, *, max_results=50,
+                       fields="key", next_page_token=None):
+    """Return validated issues and the next token, or fail on ambiguous data."""
+    params = {"jql": jql, "maxResults": max_results, "fields": fields}
+    if next_page_token is not None:
+        params["nextPageToken"] = next_page_token
+    data = _guarded_read(server, f"/search/jql?{urlencode(params)}", user,
+                         token, "Jira search")
+    if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
+        raise JiraReadError("Jira search returned a malformed issues list.")
+    issues = data["issues"]
+    if any(not isinstance(issue, dict)
+           or not isinstance(issue.get("key"), str)
+           or not issue["key"].strip() for issue in issues):
+        raise JiraReadError("Jira search returned an issue without a valid key.")
+    is_last = data.get("isLast")
+    next_token = data.get("nextPageToken")
+    if (not isinstance(is_last, bool)
+            or (is_last and next_token)
+            or (not is_last and (not isinstance(next_token, str)
+                                 or not next_token.strip()))):
+        raise JiraReadError("Jira search returned inconclusive pagination.")
+    return issues, None if is_last else next_token
+
+
+def _issue_type_name(issue):
+    """Return a confirmed type name from a linked issue or full response."""
+    fields = issue.get("fields") if isinstance(issue, dict) else None
+    issue_type = fields.get("issuetype") if isinstance(fields, dict) else None
+    name = issue_type.get("name") if isinstance(issue_type, dict) else None
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def has_existing_epics(issue, server, user, token):
+    """Check linked work with a known strategy included in the same search.
+
+    A successful but empty search can mean anonymous access, not no children.
+    Only the strategy by itself in a complete result set establishes that no
+    child epics are visible. This cannot prove visibility of every project or
+    eliminate Jira search-index delays.
+    """
+    if not isinstance(issue, dict):
+        raise JiraReadError("Cannot check existing epics without a strategy.")
+    key = issue.get("key")
+    if not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", key):
+        raise JiraReadError("Cannot check existing epics without a valid strategy key.")
+    fields = issue.get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("issuelinks"), list):
+        raise JiraReadError(f"Cannot check existing links for {key}.")
+    # Legacy Incorporates links block only when their target is an actual Epic.
+    for link in fields["issuelinks"]:
+        if not isinstance(link, dict) or not isinstance(link.get("type"), dict):
+            raise JiraReadError(f"Cannot check malformed existing links for {key}.")
+        if link["type"].get("name") != "Incorporates" or "outwardIssue" not in link:
+            continue
+        linked_issue = link["outwardIssue"]
+        linked_key = linked_issue.get("key") if isinstance(linked_issue, dict) else None
+        if (not isinstance(linked_key, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", linked_key)):
+            raise JiraReadError(f"Cannot check malformed incorporated issue for {key}.")
+        issue_type = _issue_type_name(linked_issue)
+        if not issue_type:
+            try:
+                full_issue = get_issue(server, user, token, linked_key,
+                                       fields=["issuetype"])
+            except (OSError, ValueError, http.client.HTTPException) as e:
+                raise JiraReadError(
+                    f"Cannot determine issue type for {linked_key} incorporated by "
+                    f"{key}: {safe_error_message(e)}.") from None
+            issue_type = _issue_type_name(full_issue)
+        if not issue_type:
+            raise JiraReadError(
+                f"Cannot determine issue type for {linked_key} incorporated by {key}.")
+        if issue_type == "Epic":
+            return True
+
+    jql = f"key = {key} OR (parent = {key} AND issuetype = Epic)"
+    issues, next_token = search_issues_page(
+        server, user, token, jql, max_results=2)
+    if any(item["key"] != key for item in issues):
+        return True
+    if len(issues) == 1 and next_token is None:
+        return False
+    raise JiraReadError(
+        f"Existing-epic search for {key} was empty or incomplete; "
+        "expected the known strategy alone in a complete result.")
+
 
 def get_issue(server, user, token, key, fields=None):
     """GET /rest/api/3/issue/{key}"""

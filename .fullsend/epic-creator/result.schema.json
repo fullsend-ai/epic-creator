@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "epic-creator-result.schema.json",
+  "title": "Epic Creator Fullsend Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "pipeline", "summary"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["completed", "failed"]
+    },
+    "pipeline": {
+      "const": "epic-decompose"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    }
+  }
+}

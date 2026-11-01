@@ -7,6 +7,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import fetch_components
+import submit
 
 
 @pytest.fixture
@@ -63,3 +64,28 @@ def test_component_skip_preserves_fixture_without_credentials_or_network(
     credentials.assert_not_called()
     api.assert_not_called()
     assert component_output.read_bytes() == fixture
+
+
+def test_fetch_and_submit_share_working_directory_component_cache(
+        tmp_path, monkeypatch):
+    monkeypatch.delenv("EPIC_SKIP_BOOTSTRAP", raising=False)
+    monkeypatch.delenv("EPIC_SKIP_COMPONENT_FETCH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    expected = tmp_path / ".context" / "rhai-components.txt"
+    assert Path(fetch_components.OUTPUT_PATH).resolve() == expected.resolve()
+    assert Path(submit.COMPONENTS_PATH).resolve() == expected.resolve()
+    assert not expected.exists()
+
+    credentials = ("https://jira.example.com", "user", "test-token")
+    monkeypatch.setattr(fetch_components, "require_env", lambda: credentials)
+    api = Mock(return_value=[{"name": "Widget B"}, {"name": " Widget A "}])
+    monkeypatch.setattr(fetch_components, "api_call_with_retry", api)
+
+    fetch_components.main()
+
+    api.assert_called_once_with(
+        credentials[0], f"/project/{fetch_components.PROJECT}/components",
+        credentials[1], credentials[2])
+    assert expected.read_text() == "Widget A\nWidget B\n"
+    assert submit._load_valid_components() == {"Widget A", "Widget B"}

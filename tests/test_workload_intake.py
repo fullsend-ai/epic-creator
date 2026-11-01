@@ -204,9 +204,10 @@ def test_batch_does_not_skip_initiative_with_handmade_epics(tmp_path, monkeypatc
     missing = issue("RHOAIENG-9004")
     missing["fields"]["attachment"] = []
     with patch("fetch_strategy.require_env", return_value=("https://jira.example.com", "u", "t")), \
+         patch("fetch_strategy.verify_jira_auth"), \
          patch("fetch_strategy._search_issues", return_value=[data, processed, missing]), \
          patch("fetch_strategy.download_attachment", return_value=b"# Approved strategy"), \
-         patch("fetch_strategy.api_call_with_retry", side_effect=AssertionError("No child-Epic query for Initiatives")):
+         patch("fetch_strategy._has_existing_epics", side_effect=AssertionError("No child-Epic query for Initiatives")):
         fetch_strategy.cmd_fetch(["project = RHOAIENG", "--ids-file", "ids.txt",
                                   "--workload", "rhai-initiative", "--skip-if-has-epics"])
     assert Path("ids.txt").read_text() == "RHOAIENG-9001\n"
@@ -231,6 +232,7 @@ def test_batch_keeps_good_sources_around_a_bad_attachment(tmp_path, monkeypatch,
 
     bad["fields"]["attachment"][0]["content"] = "https://jira.example.com/att/bad"
     with patch("fetch_strategy.require_env", return_value=("https://jira.example.com", "u", "t")), \
+         patch("fetch_strategy.verify_jira_auth"), \
          patch("fetch_strategy._search_issues", return_value=[issue(), bad, issue("RHOAIENG-9003")]), \
          patch("fetch_strategy.download_attachment", side_effect=download):
         fetch_strategy.cmd_fetch(["project = RHOAIENG", "--ids-file", "ids.txt",
@@ -254,6 +256,7 @@ def test_batch_skips_wrong_tracker_binding_without_losing_valid_sources(
     monkeypatch.chdir(tmp_path)
     wrong_binding = issue("RHOAIENG-9002", project="OTHER")
     with patch("fetch_strategy.require_env", return_value=("https://jira.example.com", "u", "t")), \
+         patch("fetch_strategy.verify_jira_auth"), \
          patch("fetch_strategy._search_issues",
                return_value=[issue(), wrong_binding, issue("RHOAIENG-9003")]), \
          patch("fetch_strategy.download_attachment", return_value=b"# Approved strategy"):
@@ -473,3 +476,49 @@ def test_descriptor_change_invalidates_existing_artifact(tmp_path, monkeypatch):
     path.write_text(yaml.safe_dump(changed))
     errors = artifact_utils.validate(data, "strat-task")
     assert any("digest" in error for error in errors)
+
+
+@pytest.mark.parametrize("all_checks_fail", [False, True])
+def test_strategy_workload_keeps_only_confirmed_child_checks(
+        tmp_path, monkeypatch, all_checks_fail):
+    monkeypatch.chdir(tmp_path)
+    sources = [issue(f"RHAISTRAT-{n}", "RHAISTRAT", "Feature") for n in (9001, 9002)]
+    for source in sources:
+        source["fields"]["attachment"] = []
+    Path("ids.txt").write_text("RHAISTRAT-8999\n")
+    failed = fetch_strategy.JiraReadError("synthetic inconclusive child lookup")
+    checks = [failed, failed if all_checks_fail else False]
+    with patch("fetch_strategy.require_env", return_value=("https://jira.example.com", "u", "t")), \
+         patch("fetch_strategy.verify_jira_auth") as auth, \
+         patch("fetch_strategy._search_issues", return_value=sources), \
+         patch("fetch_strategy._has_existing_epics", side_effect=checks):
+        args = ["project = RHAISTRAT", "--ids-file", "ids.txt",
+                "--workload", "rhaistrat-strategy", "--skip-if-has-epics"]
+        if all_checks_fail:
+            with pytest.raises(fetch_strategy.JiraReadError, match="some existing-epic checks failed"):
+                fetch_strategy.cmd_fetch(args)
+            assert not Path("ids.txt").exists()
+            assert not Path("artifacts").exists()
+        else:
+            fetch_strategy.cmd_fetch(args)
+            assert Path("ids.txt").read_text() == "RHAISTRAT-9002\n"
+            assert not Path("artifacts/strat-tasks/RHAISTRAT-9001.md").exists()
+            metadata, _ = artifact_utils.read_frontmatter_validated(
+                "artifacts/strat-tasks/RHAISTRAT-9002.md", "strat-task")
+            assert metadata["workload_id"] == "rhaistrat-strategy"
+            assert metadata["source_key"] == "RHAISTRAT-9002"
+    auth.assert_called_once_with("https://jira.example.com", "u", "t")
+    assert pipeline_status.read_status("RHAISTRAT-9001")["status"] == "invalid"
+
+
+def test_invalid_workload_invalidates_saved_ids_before_fetch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("ids.txt").write_text("RHAISTRAT-8999\n")
+    with patch("fetch_strategy.verify_jira_auth") as auth, \
+         patch("fetch_strategy._search_issues") as search:
+        with pytest.raises(registry_module().WorkloadError):
+            fetch_strategy.cmd_fetch(["project = RHAISTRAT", "--ids-file", "ids.txt",
+                                      "--workload", "missing-workload"])
+    assert not Path("ids.txt").exists()
+    auth.assert_not_called()
+    search.assert_not_called()

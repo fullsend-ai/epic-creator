@@ -6,15 +6,17 @@ Usage:
     python3 scripts/fetch_strategy.py fetch-one <RHAISTRAT-ID>
 """
 
+import http.client
 import os
 import sys
+import tempfile
 import urllib.error
-import urllib.parse
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
-from jira_utils import (require_env, get_issue, api_call_with_retry,
-                        adf_to_markdown, download_attachment)
+from jira_utils import (JiraReadError, require_env, get_issue, verify_jira_auth,
+                        search_issues_page, has_existing_epics as _has_existing_epics,
+                        adf_to_markdown, download_attachment, safe_error_message)
 
 import re
 import yaml
@@ -188,43 +190,21 @@ def _search_issues(server, user, token, jql, limit=100):
     all_issues = []
     fields = "summary,description,labels,issuelinks,status,priority,attachment,project,issuetype,updated"
     next_page_token = None
+    seen_tokens = set()
 
     while len(all_issues) < limit:
         batch_size = min(50, limit - len(all_issues))
-        path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-                f"&maxResults={batch_size}&fields={fields}")
-        if next_page_token:
-            path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
-        data = api_call_with_retry(server, path, user, token)
-
-        issues = data.get("issues", [])
-        if not issues:
-            break
-
+        issues, next_page_token = search_issues_page(
+            server, user, token, jql, max_results=batch_size, fields=fields,
+            next_page_token=next_page_token)
         all_issues.extend(issues)
-
-        if data.get("isLast", True):
+        if next_page_token is None:
             break
-        next_page_token = data.get("nextPageToken")
-        if not next_page_token:
-            break
+        if not issues or next_page_token in seen_tokens:
+            raise JiraReadError("Jira strategy search did not make pagination progress.")
+        seen_tokens.add(next_page_token)
 
     return all_issues
-
-
-def _has_existing_epics(issue, server, user, token):
-    """Check if a strategy already has child epics or Incorporates links."""
-    # Legacy check for pre-parent-field epics that used Incorporates links
-    for link in issue.get("fields", {}).get("issuelinks", []):
-        link_type = link.get("type", {}).get("name", "")
-        if link_type == "Incorporates" and "outwardIssue" in link:
-            return True
-    key = issue["key"]
-    jql = f"parent = {key} AND issuetype = Epic"
-    path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-            f"&maxResults=1&fields=key")
-    data = api_call_with_retry(server, path, user, token)
-    return bool(data.get("issues"))
 
 
 def cmd_fetch(args):
@@ -240,20 +220,27 @@ def cmd_fetch(args):
     parser.add_argument("--workload", help="Opt in to a registered intake workload")
     parser.add_argument("--data-dir", help="Data directory (unused, for compat)")
     opts = parser.parse_args(args)
+
+    # A failed fetch must not leave IDs from an earlier run available to use.
+    try:
+        os.unlink(opts.ids_file)
+    except FileNotFoundError:
+        pass
+
     registry = load_registry() if opts.workload else None
     if registry is not None:
         get_workload(opts.workload, registry)
 
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("ERROR: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set",
-              file=sys.stderr)
-        sys.exit(1)
+        raise JiraReadError("JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set.")
 
+    verify_jira_auth(server, user, token)
     issues = _search_issues(server, user, token, opts.jql, opts.limit)
 
-    all_keys = []
+    selected = []
     skipped = 0
+    failed_checks = 0
     for issue in issues:
         key = issue.get("key")
         if not key:
@@ -262,35 +249,55 @@ def cmd_fetch(args):
             continue
         clear_status(key)
         try:
-            selected = resolve_issue(issue, opts.workload, registry) if registry is not None else None
+            workload = resolve_issue(issue, opts.workload, registry) if registry is not None else None
         except WorkloadError as exc:
             write_status(key, "invalid", "fetch", str(exc))
             print(f"ERROR: Skipped {key}: {exc}", file=sys.stderr)
             skipped += 1
             continue
 
-        try:
-            if selected and selected.skip_policy == "processed-label":
-                processed = selected.processed_label in (issue["fields"].get("labels") or [])
-            elif opts.skip_if_has_epics:
-                processed = _has_existing_epics(issue, server, user, token)
-            else:
-                processed = False
-            if opts.skip_if_has_epics and processed:
+        if opts.skip_if_has_epics:
+            try:
+                if workload and workload.skip_policy == "processed-label":
+                    processed = workload.processed_label in (issue["fields"].get("labels") or [])
+                else:
+                    processed = _has_existing_epics(issue, server, user, token)
+            except (JiraReadError, ValueError, OSError, http.client.HTTPException) as exc:
+                message = safe_error_message(exc)
+                write_status(key, "invalid", "fetch", message)
+                print(f"WARNING: Skipped {key}: could not check existing epics: "
+                      f"{message}", file=sys.stderr)
+                failed_checks += 1
+                continue
+            if processed:
                 write_status(key, "skipped", "fetch", "already processed")
                 print(f"Skipped {key}: already processed", file=sys.stderr)
                 skipped += 1
                 continue
-            path = _write_strategy(issue, server=server, user=user, token=token,
-                                   workload=selected)
+        selected.append((issue, workload))
+
+    if failed_checks:
+        print(f"Skipped {failed_checks} strategies because existing epics "
+              "could not be checked", file=sys.stderr)
+        if not selected:
+            raise JiraReadError(
+                "No strategies fetched and some existing-epic checks failed.")
+
+    # Complete all skip checks before writing any new strategy inputs or IDs.
+    all_keys = []
+    for issue, workload in selected:
+        key = issue["key"]
+        try:
+            options = {"workload": workload} if workload is not None else {}
+            path = _write_strategy(issue, server=server, user=user, token=token, **options)
         except WorkloadError as exc:
-            if selected is None:
+            if workload is None:
                 raise
             write_status(key, "invalid", "fetch", str(exc))
             print(f"ERROR: Skipped {key}: {exc}", file=sys.stderr)
             skipped += 1
             continue
-        if path is None:
+        if path is None and workload is not None:
             write_status(key, "skipped", "fetch", "no strategy attachment")
             skipped += 1
             continue
@@ -298,15 +305,30 @@ def cmd_fetch(args):
         print(f"Fetched {key}: {issue['fields'].get('summary', '')[:60]}",
               file=sys.stderr)
 
-    os.makedirs(os.path.dirname(opts.ids_file) or "tmp", exist_ok=True)
-    with open(opts.ids_file, "w") as f:
-        for key in all_keys:
-            f.write(f"{key}\n")
+    if failed_checks and not all_keys:
+        raise JiraReadError(
+            "No strategies fetched and some existing-epic checks failed.")
+
+    ids_dir = os.path.dirname(opts.ids_file) or "."
+    os.makedirs(ids_dir, exist_ok=True)
+    ids_tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=ids_dir,
+                                         prefix=".strategy-ids-", delete=False) as f:
+            ids_tmp = f.name
+            for key in all_keys:
+                f.write(f"{key}\n")
+        os.replace(ids_tmp, opts.ids_file)
+    finally:
+        if ids_tmp is not None and os.path.exists(ids_tmp):
+            os.unlink(ids_tmp)
 
     if skipped:
-        print(f"Skipped {skipped} strategies",
-              file=sys.stderr)
+        suffix = " with existing epics" if registry is None else ""
+        print(f"Skipped {skipped} strategies{suffix}", file=sys.stderr)
     print(f"Fetched {len(all_keys)} strategies", file=sys.stderr)
+    if not all_keys:
+        print("No work to decompose.", file=sys.stderr)
 
 
 def cmd_fetch_one(args):
@@ -336,7 +358,8 @@ def cmd_fetch_one(args):
             return
         print(path)
     except Exception as exc:
-        write_status(key, "invalid", "fetch", str(exc))
+        message = str(exc) if isinstance(exc, WorkloadError) else safe_error_message(exc)
+        write_status(key, "invalid", "fetch", message)
         raise
 
 
@@ -351,6 +374,13 @@ if __name__ == "__main__":
         sys.exit(1)
     try:
         COMMANDS[sys.argv[1]](sys.argv[2:])
-    except WorkloadError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+    except (JiraReadError, OSError, ValueError, http.client.HTTPException) as exc:
+        message = str(exc) if isinstance(exc, WorkloadError) else safe_error_message(exc)
+        print(f"ERROR: Fetch failed: {message}", file=sys.stderr)
+        if sys.argv[1] == "fetch":
+            print("Fetch aborted; no IDs file published.", file=sys.stderr)
+        print("Stop this run and report the failure. Check Jira access and the "
+              "reported error, then retry the same command with its checks enabled.\n"
+              "Do not continue with saved IDs or strategy artifacts.",
+              file=sys.stderr)
         sys.exit(1)

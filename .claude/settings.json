@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"${FULLSEND_ROLE:-}\" = \"epic-creator\" ]; then cd \"${CLAUDE_PROJECT_DIR:?}\" && python3 scripts/pipeline_state.py post-compact-hook; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
