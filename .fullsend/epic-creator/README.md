@@ -80,6 +80,11 @@ pre-script and post-script. It overrides:
 - the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential). The
   production Jira profile is inherited unchanged, including enforced read-only access.
 
+OpenShell gateways store provider credentials by provider name. Because the
+production and eval providers are both named `jira`, run evals on a separate
+OpenShell gateway from production. Sharing a gateway would let one run overwrite
+the other's Jira credential and propagate that change to running sandboxes.
+
 The model comes from `fullsend run --model`. `tests/test_fullsend_eval_harness.py` pins the
 child to exactly these overrides, including the eval prompt. Run it locally,
 with no `JIRA_*` variables on the host, from a copy of the checkout holding

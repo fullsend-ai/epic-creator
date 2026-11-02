@@ -5,8 +5,10 @@
 # fullsend composes this file over its base (internal/harness/compose.go):
 # non-empty scalars override, env.sandbox / env.runner merge with these keys
 # winning, and the child provider replaces the base entry with the same name.
-# The production Jira profile is inherited unchanged, including enforced
-# read-only access, so persistent gateways never need to replace its content.
+# The production Jira access profile is inherited unchanged, but provider
+# credentials are gateway state keyed by provider name. Run evals on a separate
+# OpenShell gateway from production so their `jira` credentials cannot overwrite
+# each other.
 #
 # `model` is not set: `fullsend run --model` passes the model under evaluation.
 # tests/test_fullsend_eval_harness.py pins this file to the keys below.
