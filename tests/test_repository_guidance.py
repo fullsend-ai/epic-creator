@@ -5,14 +5,14 @@ import hashlib
 import pytest
 import yaml
 
-from repository_fixtures import ROOT, configured, git, git_source, proposal, strategy
+from repository_fixtures import ROOT, architecture_checkout, configured, git, git_source, proposal, strategy
 import repository_context as context_api
 from repository_plan import finalize_repository_plan
 from rhai_config import RepositoryError
 
 
 @pytest.fixture
-def guidance(tmp_path):
+def guidance(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     text = ("Use mapping.md for contribution ownership and architecture.json for "
             "component boundaries. Manager and cloudmanager changes belong in operator.\n")

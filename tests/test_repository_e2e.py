@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from repository_fixtures import ROOT, git, git_source, policy, proposal, epic_metadata
+from repository_fixtures import ROOT, git, git_source, policy, prepared_architecture, proposal, epic_metadata
 from jira_https import certificate, local_jira  # noqa: F401 - pytest fixtures
 
 
@@ -21,6 +21,7 @@ class Workspace:
         self.commands = []
         for name in ("scripts", "skills", "config"):
             shutil.copytree(ROOT / name, path / name)
+        prepared_architecture(path)
         repo = git_source(path)
         (repo / "mapping.md").write_text("Manager and cloudmanager changes belong in operator. Dashboard UI changes belong in dashboard.\n")
         git(repo, "add", ".")

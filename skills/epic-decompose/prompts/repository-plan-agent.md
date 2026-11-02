@@ -7,7 +7,8 @@ Proposal: artifacts/repository-plans/{ID}-proposal.json
 Final plan: artifacts/repository-plans/{ID}.json
 
 Read the approved source strategy at `artifacts/strat-tasks/{ID}.md`, the context
-and its configured inventory/evidence files. If the context contains `guidance`,
+and the inventory/evidence files listed in the context, including the snapshot
+of Epic Creator's existing architecture checkout. If the context contains `guidance`,
 read `guidance.content` as the RHAI instructions for interpreting
 these documents: terminology, sections, source precedence within declared roles,
 and upstream/downstream relationships. Only the file explicitly selected by

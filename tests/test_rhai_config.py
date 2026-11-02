@@ -32,13 +32,14 @@ def test_fixed_rhai_config_has_no_descriptor_dependency(tmp_path):
     assert api.load_config(path).digest != before
 
 
-@pytest.mark.parametrize("change", ["duplicate-source", "unknown-inventory", "unknown-guidance", "unsafe-path", "unknown-option"])
+@pytest.mark.parametrize("change", ["duplicate-source", "reserved-architecture", "unknown-inventory", "unknown-guidance", "unsafe-path", "unknown-option"])
 def test_incomplete_or_unsafe_configuration_is_rejected(tmp_path, change):
     api = config_module()
     repo = git_source(tmp_path)
     data = {"schema_version": 1, "enabled": True, "repository_policy": policy(repo)}
     p = data["repository_policy"]
     if change == "duplicate-source": p["sources"].append(dict(p["sources"][0]))
+    elif change == "reserved-architecture": p["sources"].append({**p["sources"][0], "id": "architecture-context"})
     elif change == "unknown-inventory": p["inventory"]["source_id"] = "missing"
     elif change == "unknown-guidance": p["guidance"] = {"source_id": "missing", "path": "guide.md"}
     elif change == "unsafe-path": p["inventory"]["path"] = "../escape"

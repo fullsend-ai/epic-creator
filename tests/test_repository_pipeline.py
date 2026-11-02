@@ -8,7 +8,7 @@ import shutil
 import pytest
 import yaml
 
-from repository_fixtures import ROOT, configured, git_source, proposal, strategy
+from repository_fixtures import ROOT, configured, git_source, prepared_architecture, proposal, strategy
 import artifact_utils as artifacts
 import check_decompose_progress as progress
 import pipeline_state as pipeline
@@ -18,6 +18,7 @@ import rhai_config
 
 
 def setup_pipeline(monkeypatch, tmp_path, capsys):
+    prepared_architecture(tmp_path)
     repo = git_source(tmp_path)
     selected = configured(repo)
     components = tmp_path / rhai_config.COMPONENT_FILE

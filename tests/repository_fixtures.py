@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,34 @@ def policy(repo):
 def configured(repo):
     base = module("rhai_config").load_config()
     return replace(base, repository_policy=policy(repo))
+
+
+def prepared_architecture(root):
+    """The Git checkout normally prepared by fetch-architecture-context.sh."""
+    checkout = Path(root) / ".context/architecture-context"
+    checkout.mkdir(parents=True)
+    git(checkout, "init", "-b", "main")
+    git(checkout, "config", "user.name", "Fixture")
+    git(checkout, "config", "user.email", "fixture@example.org")
+    git(checkout, "remote", "add", "origin", "https://github.com/opendatahub-io/architecture-context")
+    for relative, content in {
+        "architecture/rhoai-3.0/operator.md": "Manager and cloudmanager are operator modules.\n",
+        "overlays/operator.md": "Operator architecture overlay.\n",
+    }.items():
+        path = checkout / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    git(checkout, "add", ".")
+    git(checkout, "commit", "--signoff", "-m", "Prepared architecture fixture")
+    git(checkout, "sparse-checkout", "init", "--cone")
+    git(checkout, "sparse-checkout", "set", "architecture/rhoai-3.0", "overlays")
+    return checkout
+
+
+@pytest.fixture
+def architecture_checkout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    return prepared_architecture(tmp_path)
 
 
 def strategy(tmp_path):

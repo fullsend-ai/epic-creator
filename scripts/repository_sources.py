@@ -81,6 +81,42 @@ def _git(directory, *args, binary=False):
     return result.stdout if binary else result.stdout.decode("utf-8").strip()
 
 
+def _snapshot(source, repository, cache, commit):
+    files = {}
+    for selected in source["paths"]:
+        listing = _git(repository, "ls-tree", "-r", "--name-only", commit, "--", selected)
+        if not listing:
+            raise RepositoryError("Configured Git source path is missing")
+        for name in listing.splitlines():
+            name = _path(name)
+            if Path(name).suffix.lower() not in (".md", ".markdown", ".yaml", ".yml", ".json", ".txt"):
+                continue
+            content = _git(repository, "show", f"{commit}:{name}", binary=True)
+            dest = cache / "content" / commit / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+            files[name] = {"sha256": hashlib.sha256(content).hexdigest(), "local_path": str(dest.resolve())}
+    if not files:
+        raise RepositoryError("Configured Git source has no supported evidence files")
+    return {**source, "commit": commit, "files": files,
+            "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+def snapshot_architecture_context(cache_root: Path) -> dict:
+    """Pin the release and overlays already fetched by Epic Creator bootstrap."""
+    checkout = Path(".context/architecture-context")
+    paths = [path for path in _git(checkout, "sparse-checkout", "list").splitlines()
+             if path.startswith("architecture/") or path == "overlays" or path.startswith("overlays/")]
+    if not any(path.startswith("architecture/") for path in paths):
+        raise RepositoryError("Run scripts/fetch-architecture-context.sh before repository planning")
+    source = normalize_git_source({
+        "id": "architecture-context", "url": _git(checkout, "remote", "get-url", "origin"),
+        "ref": "HEAD", "paths": paths, "role": "supporting",
+        "owner": "architecture-context maintainers"})
+    commit = _git(checkout, "rev-parse", "HEAD^{commit}")
+    return _snapshot(source, checkout, Path(cache_root) / source["id"], commit)
+
+
 def fetch_git_sources(policy: dict, cache_root: Path) -> list[dict]:
     manifests = []
     for reference in policy["sources"]:
@@ -91,22 +127,5 @@ def fetch_git_sources(policy: dict, cache_root: Path) -> list[dict]:
             _git(cache, "init", "--bare")
         _git(cache, "fetch", "--depth=1", "--no-tags", "--", source["url"], source["ref"])
         commit = _git(cache, "rev-parse", "FETCH_HEAD^{commit}")
-        files = {}
-        for selected in source["paths"]:
-            listing = _git(cache, "ls-tree", "-r", "--name-only", commit, "--", selected)
-            if not listing:
-                raise RepositoryError("Configured Git source path is missing")
-            for name in listing.splitlines():
-                name = _path(name)
-                if Path(name).suffix.lower() not in (".md", ".markdown", ".yaml", ".yml", ".json", ".txt"):
-                    continue
-                content = _git(cache, "show", f"{commit}:{name}", binary=True)
-                dest = cache / "content" / commit / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(content)
-                files[name] = {"sha256": hashlib.sha256(content).hexdigest(), "local_path": str(dest.resolve())}
-        if not files:
-            raise RepositoryError("Configured Git source has no supported evidence files")
-        manifests.append({**source, "commit": commit, "files": files,
-                          "fetched_at": datetime.now(timezone.utc).isoformat()})
+        manifests.append(_snapshot(source, cache, cache, commit))
     return manifests

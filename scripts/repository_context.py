@@ -9,7 +9,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 import yaml
 
-from repository_sources import fetch_git_sources, guidance_reference, normalize_git_source
+from repository_sources import fetch_git_sources, guidance_reference, normalize_git_source, snapshot_architecture_context
 from rhai_config import RepositoryError
 
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "config/_schema"
@@ -105,6 +105,7 @@ def load_repository_context(selected, source_path: Path, artifacts_dir: Path) ->
                "policy": policy, "cache_root": str((Path(artifacts_dir) / "repository-sources").resolve())}
     try:
         sources = fetch_git_sources(policy, Path(context["cache_root"]))
+        sources.append(snapshot_architecture_context(Path(context["cache_root"])))
         inventory_ref = policy["inventory"]
         source = next(s for s in sources if s["id"] == inventory_ref["source_id"])
         inventory_path = source["files"][inventory_ref["path"]]["local_path"]

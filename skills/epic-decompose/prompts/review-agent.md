@@ -45,7 +45,7 @@ repository-enabled runs it automatically stamps `repository_plan_digest`
 and `reviewed_decomposition_digest` from the actual plan and reviewed files.
 Any subsequent semantic change invalidates the review and requires re-review.
 
-In repository mode, use only the pinned architecture/mapping files in the bound context, not the legacy `.context/architecture-context/` cache.
+Repository mode uses a pinned snapshot of the existing `.context/architecture-context/` checkout alongside configured mapping sources. Read the files listed in the bound context so all stages use the same evidence.
 
 ## Step 1: Load Inputs
 

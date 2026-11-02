@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from repository_fixtures import configured, epic_metadata, git_source, proposal, strategy, write_repository_decomposition
+from repository_fixtures import architecture_checkout, configured, epic_metadata, git_source, proposal, strategy, write_repository_decomposition
 from test_repository_pipeline import setup_pipeline
 import artifact_utils as artifacts
 import pipeline_repositories
@@ -16,7 +16,7 @@ from rhai_config import RepositoryError
 
 
 @pytest.fixture
-def plan(tmp_path):
+def plan(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     context = repository_context.load_repository_context(configured(repo), strategy(tmp_path), tmp_path / "artifacts")
     return repository_plan.finalize_repository_plan(context, proposal(context))

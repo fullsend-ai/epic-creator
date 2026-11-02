@@ -54,7 +54,7 @@ complete, run `python3 scripts/repository_plan.py validate --source {ID}` and co
 its epic. The dispatcher separately validates generated epic assignments. If the
 plan itself is wrong, report the blocking defect; do not silently rewrite it.
 
-In repository mode, use only the pinned architecture/mapping files in the bound context, not the legacy `.context/architecture-context/` cache.
+Repository mode uses a pinned snapshot of the existing `.context/architecture-context/` checkout alongside configured mapping sources. Read the files listed in the bound context so all stages use the same evidence.
 
 ## Step 0: Triage
 

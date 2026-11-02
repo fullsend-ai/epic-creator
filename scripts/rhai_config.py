@@ -65,6 +65,8 @@ def load_config(path=None):
         from repository_sources import normalize_git_source, guidance_reference, _path
         policy = data["repository_policy"]
         ids = [source["id"] for source in policy["sources"]]
+        if "architecture-context" in ids:
+            raise RepositoryError("Architecture context is supplied by the existing bootstrap, not repository sources")
         if len(ids) != len(set(ids)) or policy["inventory"]["source_id"] not in ids:
             raise RepositoryError("Duplicate or missing repository inventory source")
         _path(policy["inventory"]["path"])

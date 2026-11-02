@@ -32,11 +32,3 @@ repository_policy:
     - config/rhai/repository-guidance.md
     role: supporting
     owner: pending-rhai-owner-confirmation
-  - id: architecture-context
-    url: https://github.com/opendatahub-io/architecture-context.git
-    ref: main
-    paths:
-    - architecture
-    - overlays
-    role: supporting
-    owner: pending-architecture-owner-confirmation

@@ -26,6 +26,14 @@ edits are not Git evidence. Other sources can use HTTPS Git URLs and paths.
 Fetched refs are pinned to commits and each evidence file is hashed. The loader
 rejects unavailable sources and changed snapshots instead of choosing a default.
 
+Architecture context comes from Epic Creator's existing bootstrap,
+`scripts/fetch-architecture-context.sh`, which prepares the latest RHOAI release
+and overlays in `.context/architecture-context/`. Repository planning snapshots
+that checkout's selected paths at its current Git commit and records file hashes.
+It does not fetch a second architecture repository or independently select a
+release. A missing checkout blocks planning; refreshing it requires a new plan
+and review. The `architecture-context` source ID is reserved for this snapshot.
+
 The bundled [mapping snapshot](../config/rhai/repository-mapping.md) is a Markdown
 conversion of Component Mapping Results, with its original URL, retrieval time
 and document revision. It describes downstream repositories. Populate
@@ -33,14 +41,15 @@ and document revision. It describes downstream repositories. Populate
 [`contribution-rules.md`](../config/rhai/contribution-rules.md) with confirmed
 contribution destinations and ownership relationships before changing `enabled`
 to `true`. The initial inventory is intentionally empty and activation is off.
-Source owner placeholders also need confirmation. Configure architecture paths
-for the applicable release and active overlays.
+Source owner placeholders also need confirmation. Verify that the release and
+overlays selected by the shared architecture bootstrap fit the strategy.
 
 ## Run the existing pipeline
 
-After committing the configuration and sources, install `requirements.txt`, run
-`fetch_components.py`, and use the existing `epic-decompose` skill. Repository mode
-inserts a stage before drafting:
+After committing the configuration and sources, install `requirements.txt` and
+use the existing `epic-decompose` skill. Its bootstrap runs
+`fetch-architecture-context.sh` and `fetch_components.py`. Repository mode inserts
+a stage before drafting:
 
 ```text
 FETCH → PLAN_REPOSITORIES → DECOMPOSE → REVIEW_DECOMP → revision/review → REPORT

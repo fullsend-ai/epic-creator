@@ -26,7 +26,7 @@ After any actual content change, set `revised=true`; the pipeline also detects
 changes from content digests and forces fresh review even if this flag is wrong.
 Maintain all repository metadata when correcting prose or scoring rationales.
 
-In repository mode, use only the pinned architecture/mapping files in the bound context, not the legacy `.context/architecture-context/` cache.
+Repository mode uses a pinned snapshot of the existing `.context/architecture-context/` checkout alongside configured mapping sources. Read the files listed in the bound context so all stages use the same evidence.
 
 ## Step 1: Read Context
 

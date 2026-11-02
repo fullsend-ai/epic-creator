@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from repository_fixtures import configured, git, git_source, module, strategy
+from repository_fixtures import architecture_checkout, configured, git, git_source, module, strategy
 from rhai_config import RepositoryError
 
 
-def test_uses_only_selected_workload_sources(tmp_path):
+def test_uses_configured_sources_and_existing_architecture(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     selected = configured(repo)
     source = strategy(tmp_path)
@@ -17,9 +17,10 @@ def test_uses_only_selected_workload_sources(tmp_path):
     assert set(context["inventory"]) == {"operator", "dashboard", "guidelines"}
     assert context["sources"][0]["commit"] == git(repo, "rev-parse", "HEAD")
     assert context["sources"][0]["role"] == "authoritative"
+    assert context["sources"][-1]["id"] == "architecture-context"
 
 
-def test_moving_ref_invalidates_bound_context(tmp_path):
+def test_moving_ref_invalidates_bound_context(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     selected, source = configured(repo), strategy(tmp_path)
     api = module("repository_context")
@@ -31,7 +32,7 @@ def test_moving_ref_invalidates_bound_context(tmp_path):
         api.assert_context_current(context, selected, source)
 
 
-def test_context_binds_content_and_source_roles(tmp_path):
+def test_context_binds_content_and_source_roles(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     selected, source = configured(repo), strategy(tmp_path)
     api = module("repository_context")
@@ -57,7 +58,7 @@ def test_inventory_aliases_require_declared_contribution_policy(tmp_path, mutate
         module("repository_context").validate_inventory(data)
 
 
-def test_unavailable_source_returns_explicit_blocked_context(tmp_path):
+def test_unavailable_source_returns_explicit_blocked_context(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     selected, source = configured(repo), strategy(tmp_path)
     selected.repository_policy["sources"][0]["paths"] = ["absent.yaml"]

@@ -6,12 +6,12 @@ import sys
 
 import pytest
 
-from repository_fixtures import ROOT, configured, git_source, module, proposal, strategy, epic_metadata
+from repository_fixtures import ROOT, architecture_checkout, configured, git_source, module, proposal, strategy, epic_metadata
 from rhai_config import RepositoryError
 
 
 @pytest.fixture
-def inputs(tmp_path):
+def inputs(tmp_path, architecture_checkout):
     repo = git_source(tmp_path)
     source = strategy(tmp_path)
     context = module("repository_context").load_repository_context(configured(repo), source, tmp_path / "artifacts")
