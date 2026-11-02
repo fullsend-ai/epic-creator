@@ -65,8 +65,11 @@ rather than a skill and can be run separately.
 
 `epic-creator-eval.yaml` (agent `epic-creator-eval`) runs the same package for the
 epic-creator eval: it sets `base: epic-creator.yaml` (fullsend resolves `base` relative to the
-child file) and inherits the prompt, scripts, image, policy, validation loop (DONE gate),
-pre-script and post-script. It overrides only:
+child file) and inherits the scripts, image, policy, validation loop (DONE gate),
+pre-script and post-script. It overrides:
+
+- `agent`: `epic-creator/prompt-eval.md`, which is identical to the production
+  prompt except for its frontmatter name and is kept in sync by a test;
 
 - `env.sandbox`: `JIRA_SERVER`/`JIRA_USER` as literals, and
   `CLAUDE_CODE_SUBAGENT_MODEL` from `${AGENT_EVAL_SUBAGENT_MODEL}`;
@@ -78,8 +81,9 @@ pre-script and post-script. It overrides only:
   production Jira profile is inherited unchanged, including enforced read-only access.
 
 The model comes from `fullsend run --model`. `tests/test_fullsend_eval_harness.py` pins the
-child to exactly these overrides. Run it locally, with no `JIRA_*` variables on the host, from
-a copy of the checkout holding the pre-provisioned strategy under
+child to exactly these overrides, including the eval prompt. Run it locally,
+with no `JIRA_*` variables on the host, from a copy of the checkout holding
+the pre-provisioned strategy under
 `artifacts/strat-tasks/` and its matching `.context/`:
 
 ```bash
@@ -99,9 +103,10 @@ runner to `fullsend`, selects `epic-creator-eval`, and removes the baseline's
 Claude Code tool interceptor because the Fullsend sandbox does not receive the
 eval harness interception hooks.
 
-Fullsend runs the validation loop for two iterations. If validation feedback
-arrives after the pipeline state is already DONE, the agent must write
-`agent-result.json` from that completed state without restarting the task.
+The validation loop allows up to two iterations and appends feedback only when
+validation fails. If feedback arrives after the pipeline state is already DONE,
+the agent must write `agent-result.json` from that completed state without
+restarting the task.
 
 Use `agent-eval-harness >= 1.61.0` and `fullsend >= 0.51.0`; `v0.50.0`
 predates the profile canonicalization fix. The run also needs an OpenShell
