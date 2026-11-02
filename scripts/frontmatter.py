@@ -33,6 +33,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from artifact_utils import (
     SCHEMAS,
@@ -203,6 +204,34 @@ def cmd_set(args):
                 sys.exit(1)
             data[field_name] = _coerce_value(value_str, schema[field_name])
 
+    try:
+        from artifact_utils import _REPOSITORY_SOURCE_FIELDS
+        from rhai_config import load_config
+        selected = load_config()
+        if args.source:
+            source, _ = read_frontmatter_validated(args.source, "strat-task")
+            metadata = {name: source[name] for name in _REPOSITORY_SOURCE_FIELDS if name in source}
+            if any(name in data and data[name] != value for name, value in metadata.items()):
+                raise ValueError("Explicit provenance conflicts with the source strategy")
+            data.update(metadata)
+        if schema_type == "decomp-review" and selected.planning.repository_policy:
+            from repository_plan import paths, validate_repository_plan, decomposition_digest
+            existing = read_frontmatter(args.file)[0] if os.path.exists(args.file) else {}
+            combined = {**existing, **data}
+            root = Path(args.file).parent.parent
+            locations = paths(root, combined["strat_id"])
+            plan = json.loads(locations["plan"].read_text())
+            context = json.loads(locations["context"].read_text())
+            validate_repository_plan(plan, context)
+            stamps = {"repository_plan_digest": plan["digest"],
+                      "reviewed_decomposition_digest": decomposition_digest(plan, root, combined["strat_id"])}
+            if any(name in data and data[name] != value for name, value in stamps.items()):
+                raise ValueError("Explicit review digest conflicts with current artifacts")
+            data.update(stamps)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     if os.path.exists(args.file):
         try:
             update_frontmatter(args.file, data, schema_type)
@@ -274,6 +303,7 @@ def main():
     # set
     p_set = subparsers.add_parser(
         "set", help="Set/update frontmatter fields")
+    p_set.add_argument("--source", help="Strategy artifact supplying repository provenance")
     p_set.add_argument("file", help="Path to the markdown file")
     p_set.add_argument("fields", nargs="+",
                        help="Fields as field=value pairs. Use dot notation "

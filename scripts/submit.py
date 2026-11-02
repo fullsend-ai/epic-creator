@@ -197,7 +197,7 @@ def _find_submittable_strats(artifacts_dir):
     return strat_ids
 
 
-def _build_plan(epics, valid_components):
+def _build_plan(epics, valid_components, repository_inventory=None):
     """Build submission plan from epic artifacts.
 
     Returns list of plan entries with all fields needed for submission.
@@ -249,6 +249,14 @@ def _build_plan(epics, valid_components):
             "jira_key": jira_key,
         })
 
+    if repository_inventory is not None:
+        for entry, (_, data, _) in zip(plan, epics):
+            target = data.get("target_repository")
+            label = repository_inventory[target["inventory_key"]]["label"] if target else None
+            entry["repository_label"] = label
+            entry["components"] = list(data["components"])
+            if label:
+                entry["labels"].append(label)
     return plan
 
 
@@ -670,6 +678,19 @@ def main():
 
     if not args.strat_ids and not args.all:
         parser.error("Provide RHAISTRAT IDs or use --all")
+
+    from rhai_config import load_config
+    selected = load_config()
+    if selected.planning.repository_policy:
+        from repository_submit import run_submission
+        sys.exit(run_submission(args))
+    # Disabling the policy cannot route repository-bound drafts through legacy submission.
+    from pathlib import Path
+    for path in Path(args.artifacts_dir).glob("epic-tasks/*.md"):
+        data, _ = read_frontmatter(str(path))
+        if data.get("rhai_config_digest") or data.get("mapping_snapshot_digest"):
+            print("Error: repository-bound artifacts require enabled repository mode", file=sys.stderr)
+            sys.exit(1)
 
     server, user, token = require_env()
     if not args.dry_run and not all([server, user, token]):

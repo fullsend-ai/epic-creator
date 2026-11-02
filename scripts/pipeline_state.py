@@ -24,6 +24,9 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from pipeline_repositories import bound_config, phase_config, agent_variables, validate_inputs, validate_completed
+from pipeline_status import read_status, write_status, clear_all_statuses
 
 import yaml
 
@@ -52,7 +55,7 @@ _BlockDumper.add_representer(str, _str_representer)
 # ---------- Phase enum ----------
 
 PHASES = [
-    "BATCH_START", "FETCH", "DECOMPOSE", "REVIEW_DECOMP",
+    "BATCH_START", "FETCH", "PLAN_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP",
     "REVISE_DECOMP",
     "RE_REVIEW_CHECK", "RE_REVIEW", "REVISE_CHECK", "RE_REVISE",
     "BATCH_DONE", "ERROR_COLLECT",
@@ -68,6 +71,13 @@ PHASE_CONFIG = {
         "prompt": "skills/epic-decompose/prompts/fetch-agent.md",
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "fetch",
+        "vars": {"ID": "{ID}"},
+    },
+    "PLAN_REPOSITORIES": {
+        "type": "agent",
+        "prompt": "skills/epic-decompose/prompts/repository-plan-agent.md",
+        "ids_file": "tmp/pipeline-active-ids.txt",
+        "poll_phase": "plan_repositories",
         "vars": {"ID": "{ID}"},
     },
     "DECOMPOSE": {
@@ -160,6 +170,37 @@ def _copy_ids(src, dst):
     shutil.copy2(src, dst)
 
 
+def _phase_config(state):
+    return phase_config(state, PHASE_CONFIG.get(state["phase"], {"type": "noop"}))
+
+
+def _validate_inputs_one(state, phase, key):
+    validate_inputs(state, phase, [key])
+
+
+def _validate_completed_one(state, phase, key):
+    validate_completed(state, phase, [key])
+
+
+def _validate_ids_individually(state, phase, ids_file, validator):
+    ids = _read_ids(ids_file)
+    if not bound_config(state).planning.repository_policy:
+        return ids
+    valid = []
+    for key in ids:
+        if read_status(key):
+            continue
+        try:
+            validator(state, phase, key)
+        except (ValueError, OSError, KeyError) as exc:
+            write_status(key, "invalid", phase.lower(), str(exc))
+        else:
+            valid.append(key)
+    if valid != ids:
+        _write_ids(ids_file, valid)
+    return valid
+
+
 def _reset_revised_flag(decomp_path):
     """Remove ``revised`` key from decomposition frontmatter.
 
@@ -212,6 +253,9 @@ def advance(state, dry_run=False):
     Returns (next_phase, summary_line).
     """
     phase = state["phase"]
+    repository_mode = bool(bound_config(state).planning.repository_policy)
+    if repository_mode and not dry_run and phase in ("FETCH", "PLAN_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP", "RE_REVIEW", "REVISE_DECOMP", "RE_REVISE"):
+        _validate_ids_individually(state, phase, _phase_config(state)["ids_file"], _validate_completed_one)
 
     # --- BATCH_START: reset counters, populate active IDs ---
     if phase == "BATCH_START":
@@ -223,10 +267,14 @@ def advance(state, dry_run=False):
         return "FETCH", f"BATCH_START → FETCH: batch={batch}"
 
     # --- Linear main sequence ---
-    if phase in MAIN_SEQUENCE[:-1]:
-        nxt = MAIN_SEQUENCE[MAIN_SEQUENCE.index(phase) + 1]
+    sequence = ["FETCH", "PLAN_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP"] if repository_mode else MAIN_SEQUENCE
+    if phase in sequence[:-1]:
+        nxt = sequence[sequence.index(phase) + 1]
         if phase == "DECOMPOSE" and not dry_run:
             _compute_ai_scores("tmp/pipeline-active-ids.txt")
+            if repository_mode:
+                for key in _read_ids("tmp/pipeline-active-ids.txt"):
+                    Path(f"artifacts/epic-reviews/{key}-decomp-review.md").unlink(missing_ok=True)
         return nxt, f"{phase} → {nxt}"
 
     # --- REVIEW_DECOMP → REVISE_DECOMP (unconditional first revision) ---
@@ -261,10 +309,18 @@ def advance(state, dry_run=False):
             if os.path.exists(decomp_path):
                 try:
                     data, _ = read_frontmatter(decomp_path)
-                    if data and data.get("revised"):
+                    changed = bool(data and data.get("revised"))
+                    if repository_mode:
+                        from repository_plan import decomposition_digest
+                        from pipeline_repositories import repository_plan_for
+                        plan = repository_plan_for(state, strat_id)
+                        previous, _ = read_frontmatter(f"artifacts/epic-reviews/{strat_id}-decomp-review.md")
+                        changed |= previous.get("reviewed_decomposition_digest") != decomposition_digest(plan, Path("artifacts"), strat_id)
+                    if changed:
                         revised_ids.append(strat_id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if repository_mode:
+                        write_status(strat_id, "invalid", "re_review_check", str(exc))
         if not revised_ids:
             return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: revision made no changes"
         if not dry_run:
@@ -397,6 +453,10 @@ def cmd_init(args):
             "%Y-%m-%dT%H:%M:%SZ"),
         "retry_cycle": 0,
     }
+    selected = bound_config({})
+    clear_all_statuses()
+    if selected.planning.repository_policy:
+        state.update(rhai_config_digest=selected.digest, planning_digest=selected.planning.digest)
     _save_state(state)
     print(f"Initialized pipeline state: batch_size={opts.batch_size}")
 
@@ -420,7 +480,7 @@ def cmd_set_phase(args):
 def cmd_get_phase_config(args):
     state = _load_state()
     phase = state["phase"]
-    config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
+    config = dict(_phase_config(state))
     config["phase"] = phase
     config.pop("command", None)
     config.pop("pre_script", None)
@@ -438,7 +498,7 @@ def cmd_get_phase_config(args):
 def cmd_run_phase(args):
     state = _load_state()
     phase = state["phase"]
-    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    config = _phase_config(state)
     phase_type = config.get("type", "noop")
     if phase_type != "script":
         print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'",
@@ -489,7 +549,7 @@ def cmd_next_action(args):
 
     for _ in range(MAX_NEXT_ACTION_ITERATIONS):
         phase = state["phase"]
-        config = PHASE_CONFIG.get(phase, {"type": "noop"})
+        config = _phase_config(state)
         phase_type = config.get("type", "noop")
 
         # --- DONE ---
@@ -530,7 +590,8 @@ def cmd_next_action(args):
         # --- Agent: compute next wave ---
         if phase_type == "agent":
             ids_file = config.get("ids_file", "")
-            all_ids = _read_ids(ids_file)
+            all_ids = _validate_ids_individually(state, phase, ids_file, _validate_inputs_one)
+            _save_state(state)
             poll_phase = config.get("poll_phase", "")
 
             phases_to_check = [poll_phase] if poll_phase else []
@@ -576,7 +637,7 @@ def cmd_next_action(args):
                     entry["subagent_type"] = config["subagent_type"]
                 entry["prompt_file"] = config["prompt"]
                 var_lines = []
-                for k, v in config.get("vars", {}).items():
+                for k, v in agent_variables(state, strat_id, config.get("vars", {})).items():
                     var_lines.append(
                         f"{k}={v.replace('{ID}', strat_id)}")
                 entry["vars"] = "\n".join(var_lines) + "\n"
@@ -628,7 +689,7 @@ def cmd_wait_for_wave(args):
 
     state = _load_state()
     phase = state["phase"]
-    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    config = _phase_config(state)
 
     poll_phase = config.get("poll_phase")
     if not poll_phase:
@@ -686,7 +747,7 @@ def cmd_advance(args):
     dry_run = "--dry-run" in args
     state = _load_state()
     phase = state["phase"]
-    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    config = _phase_config(state)
     phase_type = config.get("type", "noop")
     if phase_type == "script" and not dry_run:
         if not os.path.exists(DISPATCH_MARKER):
@@ -825,7 +886,7 @@ def cmd_dispatch_context(args):
     if phase == "DONE":
         print("[PIPELINE STATE RECOVERY] Pipeline complete (phase: DONE)")
         return
-    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    config = _phase_config(state)
     phase_type = config.get("type", "noop")
     print(f"[PIPELINE STATE RECOVERY] Current phase: {phase}"
           f" (type: {phase_type})")

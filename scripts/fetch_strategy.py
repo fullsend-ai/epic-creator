@@ -8,6 +8,7 @@ Usage:
 
 import http.client
 import os
+import hashlib
 import sys
 import tempfile
 import urllib.error
@@ -22,7 +23,7 @@ import yaml
 
 
 def _fetch_issue(server, user, token, key):
-    fields = ["summary", "description", "labels", "issuelinks", "status",
+    fields = ["summary", "description", "labels", "project", "issuetype", "issuelinks", "status",
               "priority", "attachment"]
     return get_issue(server, user, token, key, fields=fields)
 
@@ -51,6 +52,11 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
                     server=None, user=None, token=None):
     key = issue_data["key"]
     fields = issue_data["fields"]
+    from rhai_config import load_config
+    selected = load_config()
+    repository_mode = bool(selected.planning.repository_policy)
+    if repository_mode:
+        selected.validate_ready(issue_data)
     title = fields.get("summary", "")
     desc_raw = fields.get("description")
     labels = fields.get("labels", [])
@@ -68,7 +74,13 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
     # was truncated due to Jira's size limit)
     attachment_source = None
     attachments = fields.get("attachment", [])
-    attach_info = _find_strategy_attachment(attachments, key)
+    exact_attachment = None
+    if repository_mode:
+        candidates = [a for a in attachments if a.get("filename") == f"{key}-strategy.md"]
+        exact_attachment = max(candidates, key=lambda a: a.get("created", "")) if candidates else None
+        attach_info = (exact_attachment["filename"], exact_attachment["content"], exact_attachment.get("size", 0)) if exact_attachment else None
+    else:
+        attach_info = _find_strategy_attachment(attachments, key)
     if attach_info and server and user and token:
         attach_fn, attach_url, attach_size = attach_info
         try:
@@ -81,6 +93,8 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
                   file=sys.stderr)
         except (urllib.error.HTTPError, urllib.error.URLError,
                 ValueError, UnicodeDecodeError) as e:
+            if repository_mode:
+                raise ValueError("Unable to retrieve approved strategy attachment") from None
             print(f"  {key}: WARNING: failed to download attachment "
                   f"{attach_fn}: {e}", file=sys.stderr)
 
@@ -108,6 +122,14 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
     }
     if attachment_source:
         frontmatter["attachment_source"] = attachment_source
+    if repository_mode:
+        frontmatter.update(rhai_config_digest=selected.digest, planning_digest=selected.planning.digest,
+                           source_revision=hashlib.sha256(description.encode()).hexdigest())
+        if exact_attachment:
+            if not attachment_source:
+                raise ValueError("Approved strategy attachment was not retrieved")
+            frontmatter.update(attachment_id=str(exact_attachment["id"]),
+                               attachment_created=exact_attachment["created"])
 
     with open(path, "w") as f:
         f.write("---\n")
@@ -123,7 +145,7 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
 def _search_issues(server, user, token, jql, limit=100):
     """Search for issues using JQL with pagination via /search/jql."""
     all_issues = []
-    fields = "summary,description,labels,issuelinks,status,priority,attachment"
+    fields = "summary,description,labels,project,issuetype,issuelinks,status,priority,attachment"
     next_page_token = None
     seen_tokens = set()
 

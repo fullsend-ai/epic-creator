@@ -264,6 +264,32 @@ class ValidationError(Exception):
     pass
 
 
+SCHEMAS["epic-task"].update({
+    "repository_scope": {"type": "string"},
+    "work_item_ids": {"type": "list"},
+    "components": {"type": "list"},
+    "mapping_snapshot_digest": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "target_repository": {"type": "dict", "fields": {
+        name: {"type": "string", "required": True}
+        for name in ("inventory_key", "provider", "host", "namespace", "repository")}},
+})
+SCHEMAS["decomp-summary"]["mapping_snapshot_digest"] = {"type": "string", "pattern": r"^[0-9a-f]{64}$"}
+SCHEMAS["decomp-review"].update({
+    name: {"type": "string", "pattern": r"^[0-9a-f]{64}$"}
+    for name in ("repository_plan_digest", "reviewed_decomposition_digest")
+})
+
+_REPOSITORY_SOURCE_FIELDS = {
+    "rhai_config_digest": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "planning_digest": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "source_revision": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "attachment_id": {"type": "string"},
+    "attachment_created": {"type": "string"},
+}
+for _schema in SCHEMAS.values():
+    _schema.update(_REPOSITORY_SOURCE_FIELDS)
+
+
 def _validate_field(name, value, spec, path=""):
     """Validate a single field against its spec. Returns list of errors."""
     errors = []
@@ -344,6 +370,31 @@ def validate(data, schema_type):
         errors.extend(_validate_field(
             field_name, data.get(field_name), field_spec))
 
+    if data.get("rhai_config_digest"):
+        from rhai_config import load_config, RepositoryError
+        try:
+            selected = load_config()
+            if not selected.planning.repository_policy or data["rhai_config_digest"] != selected.digest or data.get("planning_digest") != selected.planning.digest:
+                raise RepositoryError("RHAI repository configuration or prompts changed; start a new run")
+            required = list(_REPOSITORY_SOURCE_FIELDS)[:3]
+            if schema_type == "epic-task":
+                required += ["repository_scope", "work_item_ids", "components", "mapping_snapshot_digest"]
+                if data.get("type") == "Implementation":
+                    required.append("target_repository")
+                for name in ("components", "work_item_ids"):
+                    values = data.get(name)
+                    if not isinstance(values, list) or not values or any(not isinstance(x, str) or not x for x in values) or len(values) != len(set(values)):
+                        raise RepositoryError(f"{name} must contain unique nonempty strings")
+                if data.get("component") != data["components"][0]:
+                    raise RepositoryError("Primary component must be first in components")
+                for component in data["components"]:
+                    selected.planning.validate_component(component)
+            elif schema_type == "decomp-summary": required.append("mapping_snapshot_digest")
+            elif schema_type == "decomp-review": required += ["repository_plan_digest", "reviewed_decomposition_digest"]
+            if any(not data.get(name) for name in required):
+                raise RepositoryError("Missing repository fields: " + ", ".join(name for name in required if not data.get(name)))
+        except RepositoryError as exc:
+            errors.append(str(exc))
     return errors
 
 
