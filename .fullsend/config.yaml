@@ -28,6 +28,7 @@ agents:
     - name: triage
       model: sonnet
     - source: epic-creator/epic-creator.yaml
+    - source: epic-creator/epic-creator-eval.yaml
 create_issues:
     allow_targets:
         orgs:

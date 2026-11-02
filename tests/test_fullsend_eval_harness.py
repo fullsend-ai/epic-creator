@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Pin the eval child harness (.fullsend/epic-creator/epic-creator-eval.yaml) to its base.
+
+The eval variant runs the production package (epic-creator.yaml) with no production Jira
+credential and the models under evaluation injected from outside. fullsend composes a child over its base
+(internal/harness/compose.go): non-empty scalars override, ``env.sandbox`` / ``env.runner``
+merge with child keys winning, and ``providers`` entries replace the base entry with the same
+provider ``name``. The tests mirror only
+that much of the policy and assert the composed eval harness differs from the production file
+in exactly the keys the eval needs, so any other drift (a model, an image, a gate) fails CI.
+"""
+
+from pathlib import Path
+
+import yaml
+
+REPO = Path(__file__).resolve().parent.parent
+FULLSEND_DIR = REPO / ".fullsend"
+HARNESS_DIR = FULLSEND_DIR / "epic-creator"
+PRODUCTION = HARNESS_DIR / "epic-creator.yaml"
+EVAL = HARNESS_DIR / "epic-creator-eval.yaml"
+
+EVAL_JIRA_SERVER = "https://redhat.atlassian.net"
+EVAL_JIRA_USER = "eval"
+EVAL_JIRA_TOKEN = "eval-no-jira"
+EVAL_SKIP = "1"
+
+# Every path at which the composed eval harness may differ from the production file.
+EXPECTED_DIFF = {
+    "agent",
+    "timeout_minutes",
+    "env.sandbox.JIRA_SERVER",
+    "env.sandbox.JIRA_USER",
+    "env.sandbox.CLAUDE_CODE_SUBAGENT_MODEL",
+    "env.runner.JIRA_SERVER",
+    "env.runner.JIRA_USER",
+    "env.runner.JIRA_TOKEN",
+    "env.runner.EPIC_SKIP_BOOTSTRAP",
+    "env.runner.EPIC_SKIP_COMPONENT_FETCH",
+    "openshell.profiles",
+    "providers",
+}
+
+
+def _load(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def _local(entry):
+    """A list entry that is a local file under .fullsend/ (built-ins like vertex-ai are not)."""
+    return (FULLSEND_DIR / entry).is_file()
+
+
+def _identity(entry, key):
+    return _load(FULLSEND_DIR / entry)[key] if _local(entry) else entry
+
+
+def _merge_list(base, child, key):
+    child_ids = {_identity(e, key) for e in child}
+    return [e for e in base if _identity(e, key) not in child_ids] + list(child)
+
+
+def _compose(base, child):
+    out = dict(base)
+    for k, v in child.items():
+        if k == "base":
+            continue
+        if k == "env":
+            out["env"] = {
+                section: {**base.get("env", {}).get(section, {}), **v.get(section, {})}
+                for section in set(base.get("env", {})) | set(v)
+            }
+        elif k == "providers":
+            out[k] = _merge_list(base.get(k, []), v, "name")
+        elif k == "openshell":
+            out[k] = {**base.get(k, {}), **v}
+            out[k]["profiles"] = _merge_list(
+                base.get(k, {}).get("profiles", []),
+                v.get("profiles", []),
+                "id",
+            )
+        elif v not in (None, "", [], {}):
+            out[k] = v
+    return out
+
+
+def _diff(a, b, prefix=""):
+    if isinstance(a, dict) and isinstance(b, dict):
+        paths = set()
+        for k in set(a) | set(b):
+            paths |= _diff(a.get(k), b.get(k), f"{prefix}{k}.")
+        return paths
+    return set() if a == b else {prefix.rstrip(".")}
+
+
+def test_both_harnesses_parse():
+    assert isinstance(_load(PRODUCTION), dict)
+    assert isinstance(_load(EVAL), dict)
+
+
+def test_eval_base_is_the_production_harness():
+    # fullsend resolves `base` relative to the child's own directory.
+    child = _load(EVAL)
+    assert (EVAL.parent / child["base"]).resolve() == PRODUCTION.resolve()
+
+
+def test_eval_sets_only_the_listed_keys():
+    child = _load(EVAL)
+    assert set(child) == {"base", "agent", "timeout_minutes", "env", "openshell", "providers"}, (
+        "the eval child inherits everything else from epic-creator.yaml; `model` comes from "
+        "`fullsend run --model`"
+    )
+    assert child["agent"] == "epic-creator/prompt-eval.md"
+    assert child["timeout_minutes"] == 125
+    assert set(child["env"]) == {"sandbox", "runner"}
+    # The provider and profile lists replace only the jira entries.
+    assert child["providers"] == ["epic-creator/jira-provider-eval.yaml"]
+    assert child["openshell"]["profiles"] == ["epic-creator/jira-profile-eval.yaml"]
+
+
+def test_composed_eval_differs_from_production_only_in_listed_keys():
+    base = _load(PRODUCTION)
+    composed = _compose(base, _load(EVAL))
+    assert _diff(base, composed) == EXPECTED_DIFF
+
+
+def test_composed_provider_swaps_only_the_jira_entry():
+    base = _load(PRODUCTION)
+    composed = _compose(base, _load(EVAL))
+    # The base provider and profile entries are replaced.
+    base_providers = [p for p in base["providers"] if _identity(p, "name") != "jira"]
+    assert composed["providers"] == base_providers + ["epic-creator/jira-provider-eval.yaml"]
+    base_profiles = [
+        p for p in base["openshell"]["profiles"] if _identity(p, "id") != "jira"
+    ]
+    assert composed["openshell"]["profiles"] == base_profiles + [
+        "epic-creator/jira-profile-eval.yaml"
+    ]
+
+
+def test_eval_values():
+    child = _load(EVAL)
+    assert child["env"]["sandbox"] == {
+        "JIRA_SERVER": EVAL_JIRA_SERVER,
+        "JIRA_USER": EVAL_JIRA_USER,
+        "CLAUDE_CODE_SUBAGENT_MODEL": "${AGENT_EVAL_SUBAGENT_MODEL}",
+    }
+    # Literals, so a host without Jira credentials passes fullsend's env validation.
+    assert child["env"]["runner"] == {
+        "JIRA_SERVER": EVAL_JIRA_SERVER,
+        "JIRA_USER": EVAL_JIRA_USER,
+        "JIRA_TOKEN": EVAL_JIRA_TOKEN,
+        "EPIC_SKIP_BOOTSTRAP": EVAL_SKIP,
+        "EPIC_SKIP_COMPONENT_FETCH": EVAL_SKIP,
+    }
+
+
+def test_composed_runner_env_skips_host_pre_script_work():
+    composed = _compose(_load(PRODUCTION), _load(EVAL))
+    assert composed["env"]["runner"]["EPIC_SKIP_BOOTSTRAP"] == EVAL_SKIP
+    assert composed["env"]["runner"]["EPIC_SKIP_COMPONENT_FETCH"] == EVAL_SKIP
+
+
+def test_eval_provider_replaces_jira_provider_with_literal_credential():
+    base = _load(PRODUCTION)
+    composed = _compose(base, _load(EVAL))
+    base_jira = [p for p in base["providers"] if _local(p) and _identity(p, "name") == "jira"]
+    eval_jira = [p for p in composed["providers"] if _local(p) and _identity(p, "name") == "jira"]
+    assert len(base_jira) == 1 and len(eval_jira) == 1
+    assert eval_jira[0] != base_jira[0]
+    prod_provider = _load(FULLSEND_DIR / base_jira[0])
+    eval_provider = _load(FULLSEND_DIR / eval_jira[0])
+    assert eval_provider["type"] == prod_provider["type"]
+    assert eval_provider["credentials"] == {"JIRA_TOKEN": EVAL_JIRA_TOKEN}
+    # Built-in providers (vertex-ai) are inherited unchanged.
+    assert [p for p in composed["providers"] if not _local(p)] == [
+        p for p in base["providers"] if not _local(p)
+    ]
+
+
+def test_eval_profile_has_no_egress():
+    base = _load(PRODUCTION)
+    composed = _compose(base, _load(EVAL))
+    (jira_path,) = [p for p in composed["openshell"]["profiles"] if _identity(p, "id") == "jira"]
+    profile = _load(FULLSEND_DIR / jira_path)
+    assert profile["endpoints"] == []
+
+
+def test_eval_provider_credentials_declared_by_profile():
+    composed = _compose(_load(PRODUCTION), _load(EVAL))
+    profiles = {
+        _identity(p, "id"): _load(FULLSEND_DIR / p) for p in composed["openshell"]["profiles"]
+    }
+    for entry in composed["providers"]:
+        if not _local(entry):
+            continue
+        provider = _load(FULLSEND_DIR / entry)
+        declared = {
+            var
+            for cred in profiles[provider["type"]].get("credentials", [])
+            for var in cred.get("env_vars", [])
+        }
+        assert set(provider.get("credentials", {})) <= declared
+
+
+def _prompt(path):
+    """(frontmatter dict, body) of an agent prompt file."""
+    text = path.read_text()
+    assert text.startswith("---\n"), path
+    frontmatter, body = text[4:].split("\n---\n", 1)
+    return yaml.safe_load(frontmatter), body
+
+
+def test_eval_prompt_is_the_production_prompt_under_the_eval_name():
+    """fullsend's Claude runtime rejects an agent prompt whose frontmatter name is not the
+    harness name, so the eval child cannot inherit prompt.md. Its own prompt carries the
+    eval harness's name and, byte for byte, the production body."""
+    base = _load(PRODUCTION)
+    child = _load(EVAL)
+    prod_fm, prod_body = _prompt(FULLSEND_DIR / base["agent"])
+    eval_fm, eval_body = _prompt(FULLSEND_DIR / child["agent"])
+    assert prod_fm["name"] == PRODUCTION.stem == "epic-creator"
+    assert eval_fm["name"] == EVAL.stem == "epic-creator-eval"
+    assert set(eval_fm) == set(prod_fm) == {"name", "description"}
+    assert eval_body == prod_body, "prompt-eval.md body drifted from prompt.md: copy it over"
+
+
+def test_prompt_retry_after_done_writes_result_without_restarting():
+    """A validation retry after DONE must return the completed state, not rerun work."""
+    base = _load(PRODUCTION)
+    child = _load(EVAL)
+    for harness in (base, child):
+        _, body = _prompt(FULLSEND_DIR / harness["agent"])
+        normalized = " ".join(body.split())
+        assert (
+            'the sentence "The previous iteration\'s output failed validation"'
+            in normalized
+        )
+        assert "followed by a `<validation-output>` block" in normalized
+        assert "the task text from `FULLSEND_TASK` is never that signal" in normalized
+        assert "`python3 scripts/pipeline_state.py status`" in normalized
+        assert (
+            "A DONE state without that feedback is left over from an earlier run"
+            in normalized
+        )
+        assert "DONE is the end of the task for `/epic-decompose`" in normalized
+
+
+def test_config_registers_eval_harness():
+    sources = [a.get("source") for a in _load(FULLSEND_DIR / "config.yaml")["agents"]]
+    assert "epic-creator/epic-creator.yaml" in sources
+    assert "epic-creator/epic-creator-eval.yaml" in sources
