@@ -246,7 +246,8 @@ def validate_epic_scopes(plan: dict, epics: list[dict]) -> None:
         expected = sorted(actual[dep]["epic_id"] for dep in scope["dependencies"])
         if sorted(epic.get("dependencies", [])) != expected:
             raise RepositoryError("Epic dependencies conflict with repository scope plan")
-        if scope.get("gated_by") and epic.get("gated_by") != actual[scope["gated_by"]]["epic_id"]:
+        expected_gate = actual[scope["gated_by"]]["epic_id"] if scope.get("gated_by") else None
+        if epic.get("gated_by") != expected_gate:
             raise RepositoryError("Epic Investigation gate conflicts with repository scope plan")
 
 
@@ -276,7 +277,7 @@ def main():
     args = parser.parse_args()
     try:
         selected = load_config()
-        selected.validate_identity(args.source, selected.project, selected.issue_type)
+        selected.validate_identity(args.source)
         locations = paths(args.artifacts_dir, args.source)
         if args.command == "prepare":
             context = load_repository_context(selected, args.artifacts_dir / f"strat-tasks/{args.source}.md", args.artifacts_dir)
@@ -289,9 +290,9 @@ def main():
         if args.command == "finalize":
             plan = finalize_repository_plan(context, json.loads(locations["proposal"].read_text()))
             if context.get("status") == "ready":
-                components = selected.planning.canonical_components()
+                components = selected.canonical_components()
                 for item in plan["work_items"]:
-                    selected.planning.validate_component(item["component"], components)
+                    selected.validate_component(item["component"], components)
             atomic_json(locations["plan"], plan)
             return 0 if plan["ready_for_drafting"] else 2
         validate_repository_plan(json.loads(locations["plan"].read_text()), context)

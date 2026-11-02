@@ -20,7 +20,7 @@ def test_repository_source_is_bound_to_configuration_and_content(tmp_path, monke
     path=fetch_strategy._write_strategy(issue(["strat-creator-rubric-pass","strat-creator-human-sign-off"]),tmp_path/"input")
     data,body=artifact_utils.read_frontmatter(path)
     assert data["rhai_config_digest"]==selected.digest
-    assert data["planning_digest"]==selected.planning.digest
+    assert data["planning_digest"]==selected.planning_digest
     assert data["source_revision"]==hashlib.sha256(body.strip().encode()).hexdigest()
 
 

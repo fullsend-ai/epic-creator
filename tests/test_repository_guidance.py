@@ -20,7 +20,7 @@ def guidance(tmp_path):
     git(repo, "add", ".")
     git(repo, "commit", "--signoff", "-m", "Add planning instructions")
     selected = configured(repo)
-    policy = selected.planning.repository_policy
+    policy = selected.repository_policy
     policy["sources"][0]["paths"].append("planning.md")
     policy["guidance"] = {"source_id": "mapping", "path": "planning.md"}
     return repo, selected, strategy(tmp_path), text
@@ -55,7 +55,7 @@ def test_unavailable_or_unreadable_guidance_blocks_drafting(guidance, tmp_path, 
     repo, selected, source, _ = guidance
     if content is None:
         # File exists in Git but is outside the configured source selection.
-        selected.planning.repository_policy["sources"][0]["paths"].remove("planning.md")
+        selected.repository_policy["sources"][0]["paths"].remove("planning.md")
     else:
         (repo / "planning.md").write_bytes(content if isinstance(content, bytes) else content.encode())
         git(repo, "add", ".")

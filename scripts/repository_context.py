@@ -92,15 +92,15 @@ def validate_context_snapshot(context):
 
 
 def load_repository_context(selected, source_path: Path, artifacts_dir: Path) -> dict:
-    policy = selected.planning.repository_policy
+    policy = selected.repository_policy
     if not policy:
         raise RepositoryError("RHAI configuration has no repository policy")
     # Validate references before recording diagnostics or copying configuration.
     for source in policy["sources"]:
         normalize_git_source(source)
     context = {"schema_version": 1, "source_key": Path(source_path).stem,
-               "rhai_config_id": selected.id, "rhai_config_version": selected.version,
-               "rhai_config_digest": selected.digest, "planning_digest": selected.planning.digest,
+               "rhai_config_id": "rhai", "rhai_config_version": selected.version,
+               "rhai_config_digest": selected.digest, "planning_digest": selected.planning_digest,
                "strategy_sha256": hashlib.sha256(Path(source_path).read_bytes()).hexdigest(),
                "policy": policy, "cache_root": str((Path(artifacts_dir) / "repository-sources").resolve())}
     try:

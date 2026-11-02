@@ -22,8 +22,11 @@ Environment variables:
 
 import argparse
 import glob
+import hashlib
 import http.client
+import json
 import os
+from pathlib import Path
 import re
 import sys
 
@@ -276,6 +279,9 @@ def _print_plan(plan, strat_id, dry_run):
         if entry["dependencies"]:
             print(f"  {'':>30} blocked by: "
                   f"{', '.join(entry['dependencies'])}")
+        if "repository_label" in entry:
+            print(f"  Repository: {entry['repository_label'] or 'Investigation'}; "
+                  f"components: {', '.join(entry['components'])}")
 
     if already:
         print(f"\n  Resume: {already} already created, "
@@ -304,7 +310,7 @@ def _get_strat_assignee(server, user, token, strat_id):
         return None
 
 
-def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
+def _create_epics(server, user, token, plan, strat_id, assignee_id=None, create=None):
     """Create epic issues in Jira. Writes jira_key to frontmatter on success.
 
     Stops on first failure — already-created epics (jira_key in frontmatter)
@@ -330,13 +336,12 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
         try:
             # Build description ADF
             desc_md = _build_description(entry["body"])
-            desc_adf = markdown_to_adf(desc_md)
+            desc_adf = entry.get("description_adf") or markdown_to_adf(desc_md)
 
             # Components list (empty if no mapping)
-            components = [entry["component"]] if entry["component"] else []
+            components = entry.get("components", [entry["component"]] if entry["component"] else [])
 
-            jira_key = create_issue(
-                server, user, token,
+            fields = dict(
                 project=TARGET_PROJECT,
                 issue_type=TARGET_ISSUE_TYPE,
                 summary=entry["title"],
@@ -347,6 +352,8 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
                 parent_key=strat_id,
                 assignee_id=assignee_id,
             )
+            jira_key = (create(entry, **fields) if create else
+                        create_issue(server, user, token, **fields))
         except Exception as e:
             print(f"  ERROR creating {epic_id}: {e}", file=sys.stderr)
             print(f"  Stopping epic creation for this strategy. "
@@ -401,6 +408,12 @@ def _create_dependency_links(server, user, token, plan, id_to_jira_key):
                       f"dependency not created", file=sys.stderr)
                 continue
             try:
+                if "repository_label" in entry:
+                    issue = get_issue(server, user, token, blocker_key, fields=["issuelinks"])
+                    if any(link.get("type", {}).get("name") == DEPENDENCY_LINK_TYPE
+                           and link.get("outwardIssue", {}).get("key") == blocked_key
+                           for link in issue["fields"].get("issuelinks", [])):
+                        continue
                 # blocker "blocks" blocked:
                 # inward = blocker (shows "blocks X")
                 # outward = blocked (shows "is blocked by X")
@@ -509,7 +522,7 @@ def _attach_branch_plans(server, user, token, artifacts_dir, strat_id,
             content = _build_branch_plan_md(epics)
             action = _replace_attachment(
                 server, user, token, jira_key, filename,
-                content, existing)
+                content, existing, immutable=bool(epics[0][1].get("mapping_snapshot_digest")))
             print(f"  {action.title()} {filename} on {jira_key} "
                   f"({len(epics)} conditional epics)")
         except Exception as e:
@@ -520,13 +533,21 @@ def _attach_branch_plans(server, user, token, artifacts_dir, strat_id,
 
 
 def _replace_attachment(server, user, token, jira_key, filename, content,
-                        existing):
+                        existing, immutable=False):
     """Upload an attachment, replacing any prior version.
 
     existing is a {filename: attachment_id} dict from
     _get_existing_attachments.  Returns "attached" | "replaced" | "skipped"
-    to indicate what happened (skipped only on empty content).
+    to indicate what happened. Repository evidence uses content hashes in its
+    filename and is skipped when that exact version is already attached.
     """
+    if immutable:
+        stem, extension = os.path.splitext(filename)
+        filename = f"{stem}-{hashlib.sha256(content.encode()).hexdigest()}{extension}"
+        if filename in existing:
+            return "skipped"
+        add_attachment(server, user, token, jira_key, filename, content, retry=False)
+        return "attached"
     if filename in existing:
         api_call(server, f"/attachment/{existing[filename]}",
                  user, token, method="DELETE")
@@ -561,7 +582,12 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key):
                 allow_unicode=True)
             action = _replace_attachment(
                 server, user, token, jira_key, filename,
-                yaml_content, existing)
+                yaml_content, existing, immutable="repository_label" in entry)
+            if "repository_evidence" in entry:
+                _replace_attachment(server, user, token, jira_key,
+                    f"{jira_key}-repository-evidence.json",
+                    json.dumps(entry["repository_evidence"], sort_keys=True, indent=2),
+                    existing, immutable=True)
             print(f"  {action.title()} {filename} on {jira_key}")
         except Exception as e:
             print(f"  ERROR attaching frontmatter to {jira_key}: {e}",
@@ -571,7 +597,7 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key):
 
 
 def _submit_strategy(server, user, token, strat_id, plan, dry_run,
-                     artifacts_dir="artifacts"):
+                     artifacts_dir="artifacts", repository_submission=None):
     """Execute all submission phases for one strategy.
 
     Returns (created_count, error_count).
@@ -589,6 +615,11 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         print("  [DRY RUN] Would attach frontmatter to each epic")
         print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
         return len(pending), 0
+
+    if repository_submission is not None:
+        from repository_submit import publication
+        with publication(repository_submission, Path(artifacts_dir), (server, user, token)) as (create, assignee):
+            return _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee, create)
 
     failure = None
     recovery = (
@@ -620,11 +651,17 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
 
     # Fetch strategy assignee to propagate to epics
     assignee_id = _get_strat_assignee(server, user, token, strat_id)
+    return _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee_id)
+
+
+def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee_id, create=None):
+    """One publication flow for ordinary and repository-oriented epics."""
 
     # Phase 1: Create epic issues as children of strategy (idempotent)
     print("  Phase 1: Creating epics...")
+    arguments = {"create": create} if create else {}
     id_to_jira_key, errors = _create_epics(server, user, token, plan,
-                                           strat_id, assignee_id)
+                                           strat_id, assignee_id, **arguments)
     created = len(id_to_jira_key) - sum(
         1 for e in plan if e["jira_key"])
 
@@ -650,13 +687,15 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
 
     # Phase 5: Label source strategy (only when ALL epics are created)
     all_created = len(id_to_jira_key) == len(plan)
-    if all_created:
+    if all_created and not errors:
         print("  Phase 5: Labeling source strategy...")
-        if not _label_strategy(server, user, token, strat_id):
+        repository_bound = any("repository_label" in entry for entry in plan)
+        already_labeled = (repository_bound and STRAT_LABEL in
+                           get_issue(server, user, token, strat_id, fields=["labels"])["fields"].get("labels", []))
+        if not already_labeled and not _label_strategy(server, user, token, strat_id):
             errors += 1
     else:
-        print(f"  Phase 5: SKIP labeling — "
-              f"{len(plan) - len(id_to_jira_key)} epics not yet created")
+        print("  Phase 5: SKIP labeling — publication is incomplete")
 
     return created, errors
 
@@ -681,16 +720,14 @@ def main():
 
     from rhai_config import load_config
     selected = load_config()
-    if selected.planning.repository_policy:
-        from repository_submit import run_submission
-        sys.exit(run_submission(args))
+    repository_mode = bool(selected.repository_policy)
     # Disabling the policy cannot route repository-bound drafts through legacy submission.
-    from pathlib import Path
-    for path in Path(args.artifacts_dir).glob("epic-tasks/*.md"):
-        data, _ = read_frontmatter(str(path))
-        if data.get("rhai_config_digest") or data.get("mapping_snapshot_digest"):
-            print("Error: repository-bound artifacts require enabled repository mode", file=sys.stderr)
-            sys.exit(1)
+    if not repository_mode:
+        for path in Path(args.artifacts_dir).glob("epic-tasks/*.md"):
+            data, _ = read_frontmatter(str(path))
+            if data.get("rhai_config_digest") or data.get("mapping_snapshot_digest"):
+                print("Error: repository-bound artifacts require enabled repository mode", file=sys.stderr)
+                sys.exit(1)
 
     server, user, token = require_env()
     if not args.dry_run and not all([server, user, token]):
@@ -706,7 +743,7 @@ def main():
     # Determine which strategies to submit
     if args.all:
         epic_tasks_dir = os.path.join(args.artifacts_dir, "epic-tasks")
-        if not os.path.isdir(epic_tasks_dir):
+        if not os.path.isdir(epic_tasks_dir) and not repository_mode:
             print(f"Error: {epic_tasks_dir} is not a directory.",
                   file=sys.stderr)
             sys.exit(1)
@@ -717,7 +754,17 @@ def main():
             print("No decompositions found. Nothing to submit.")
             return
     else:
-        strat_ids = args.strat_ids
+        strat_ids = list(dict.fromkeys(args.strat_ids))
+
+    submissions = {}
+    if repository_mode:
+        from repository_submit import preflight
+        try:
+            # Check every selected local plan before the first Jira write.
+            submissions = {key: preflight(selected, key, Path(args.artifacts_dir)) for key in strat_ids}
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     total_created = 0
     total_skipped = 0
@@ -747,13 +794,19 @@ def main():
         print(f"  Epics: {len(epics)}")
 
         # Build submission plan
-        plan = _build_plan(epics, valid_components)
+        submission = submissions.get(strat_id)
+        plan = submission["plan"] if submission else _build_plan(epics, valid_components)
         _print_plan(plan, strat_id, args.dry_run)
 
         # Execute submission
-        created, errors = _submit_strategy(
-            server, user, token, strat_id, plan, args.dry_run,
-            artifacts_dir=args.artifacts_dir)
+        try:
+            arguments = {"repository_submission": submission} if submission else {}
+            created, errors = _submit_strategy(
+                server, user, token, strat_id, plan, args.dry_run,
+                artifacts_dir=args.artifacts_dir, **arguments)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            created, errors = 0, 1
         total_created += created
         total_errors += errors
 

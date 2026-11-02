@@ -214,7 +214,7 @@ def cmd_set(args):
             if any(name in data and data[name] != value for name, value in metadata.items()):
                 raise ValueError("Explicit provenance conflicts with the source strategy")
             data.update(metadata)
-        if schema_type == "decomp-review" and selected.planning.repository_policy:
+        if schema_type == "decomp-review" and selected.repository_policy:
             from repository_plan import paths, validate_repository_plan, decomposition_digest
             existing = read_frontmatter(args.file)[0] if os.path.exists(args.file) else {}
             combined = {**existing, **data}

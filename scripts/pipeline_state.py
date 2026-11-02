@@ -184,7 +184,7 @@ def _validate_completed_one(state, phase, key):
 
 def _validate_ids_individually(state, phase, ids_file, validator):
     ids = _read_ids(ids_file)
-    if not bound_config(state).planning.repository_policy:
+    if not bound_config(state).repository_policy:
         return ids
     valid = []
     for key in ids:
@@ -253,7 +253,7 @@ def advance(state, dry_run=False):
     Returns (next_phase, summary_line).
     """
     phase = state["phase"]
-    repository_mode = bool(bound_config(state).planning.repository_policy)
+    repository_mode = bool(bound_config(state).repository_policy)
     if repository_mode and not dry_run and phase in ("FETCH", "PLAN_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP", "RE_REVIEW", "REVISE_DECOMP", "RE_REVISE"):
         _validate_ids_individually(state, phase, _phase_config(state)["ids_file"], _validate_completed_one)
 
@@ -455,8 +455,8 @@ def cmd_init(args):
     }
     selected = bound_config({})
     clear_all_statuses()
-    if selected.planning.repository_policy:
-        state.update(rhai_config_digest=selected.digest, planning_digest=selected.planning.digest)
+    if selected.repository_policy:
+        state.update(rhai_config_digest=selected.digest, planning_digest=selected.planning_digest)
     _save_state(state)
     print(f"Initialized pipeline state: batch_size={opts.batch_size}")
 

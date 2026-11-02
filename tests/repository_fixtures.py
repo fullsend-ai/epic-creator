@@ -58,7 +58,7 @@ def policy(repo):
 
 def configured(repo):
     base = module("rhai_config").load_config()
-    return replace(base, planning=replace(base.planning, repository_policy=policy(repo)))
+    return replace(base, repository_policy=policy(repo))
 
 
 def strategy(tmp_path):

@@ -374,7 +374,7 @@ def validate(data, schema_type):
         from rhai_config import load_config, RepositoryError
         try:
             selected = load_config()
-            if not selected.planning.repository_policy or data["rhai_config_digest"] != selected.digest or data.get("planning_digest") != selected.planning.digest:
+            if not selected.repository_policy or data["rhai_config_digest"] != selected.digest or data.get("planning_digest") != selected.planning_digest:
                 raise RepositoryError("RHAI repository configuration or prompts changed; start a new run")
             required = list(_REPOSITORY_SOURCE_FIELDS)[:3]
             if schema_type == "epic-task":
@@ -388,7 +388,7 @@ def validate(data, schema_type):
                 if data.get("component") != data["components"][0]:
                     raise RepositoryError("Primary component must be first in components")
                 for component in data["components"]:
-                    selected.planning.validate_component(component)
+                    selected.validate_component(component)
             elif schema_type == "decomp-summary": required.append("mapping_snapshot_digest")
             elif schema_type == "decomp-review": required += ["repository_plan_digest", "reviewed_decomposition_digest"]
             if any(not data.get(name) for name in required):

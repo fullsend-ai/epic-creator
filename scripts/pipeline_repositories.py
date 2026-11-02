@@ -17,7 +17,7 @@ BOUND_FIELDS = {"rhai_config_digest", "planning_digest", "source_bindings", "rep
 
 def bound_config(state):
     selected = rhai_config.load_config()
-    if "rhai_config_digest" in state and (state["rhai_config_digest"] != selected.digest or state.get("planning_digest") != selected.planning.digest):
+    if "rhai_config_digest" in state and (state["rhai_config_digest"] != selected.digest or state.get("planning_digest") != selected.planning_digest):
         raise RepositoryError("Bound RHAI repository configuration or prompts changed; start a new run")
     return selected
 
@@ -25,17 +25,17 @@ def bound_config(state):
 def phase_config(state, base):
     selected = bound_config(state)
     config = deepcopy(base)
-    if config.get("type") == "agent" and selected.planning.repository_policy:
+    if config.get("type") == "agent" and selected.repository_policy:
         config.setdefault("vars", {}).update(
             REPOSITORY_PLAN="artifacts/repository-plans/{ID}.json",
             REPOSITORY_CONTEXT="artifacts/repository-plans/{ID}-context.json",
-            COMPONENT_FILE=selected.planning.component_file)
+            COMPONENT_FILE=rhai_config.COMPONENT_FILE)
     return config
 
 
 def agent_variables(state, key, variables):
     result = {name: value.replace("{ID}", key) for name, value in variables.items()}
-    if state["phase"] != "FETCH" and bound_config(state).planning.repository_policy:
+    if state["phase"] != "FETCH" and bound_config(state).repository_policy:
         from repository_plan import paths
         result["MAPPING_SNAPSHOT_DIGEST"] = _json(paths("artifacts", key)["context"])["digest"]
     return result
@@ -74,7 +74,7 @@ def repository_plan_for(state, key, artifacts_dir="artifacts", prepare=False):
 def validate_ids(state, ids):
     selected = bound_config(state)
     for key in ids:
-        selected.validate_identity(key, selected.project, selected.issue_type)
+        selected.validate_identity(key)
 
 
 def _read(path, schema):
@@ -90,7 +90,7 @@ def source_metadata(state, key, artifacts_dir="artifacts"):
     data = _read(Path(artifacts_dir) / f"strat-tasks/{key}.md", "strat-task")
     if data["strat_id"] != key:
         raise RepositoryError(f"{key}: source artifact identity conflicts with filename")
-    expected = {"rhai_config_digest": selected.digest, "planning_digest": selected.planning.digest}
+    expected = {"rhai_config_digest": selected.digest, "planning_digest": selected.planning_digest}
     if any(data.get(name) != value for name, value in expected.items()):
         raise RepositoryError(f"{key}: source configuration provenance conflicts with pipeline")
     if not data.get("source_revision"):
@@ -116,7 +116,7 @@ def validate_artifact(state, key, path, schema, artifacts_dir="artifacts"):
         raise RepositoryError(f"{key}: generated provenance conflicts with strategy at {path}")
     if schema == "epic-task" and data["epic_id"] != Path(path).stem:
         raise RepositoryError(f"{key}: epic identity conflicts with filename at {path}")
-    if schema == "decomp-review" and bound_config(state).planning.repository_policy:
+    if schema == "decomp-review" and bound_config(state).repository_policy:
         from repository_plan import decomposition_digest
         plan = repository_plan_for(state, key, artifacts_dir)
         if (data.get("repository_plan_digest") != plan["digest"]
@@ -133,7 +133,7 @@ def validate_decomposition(state, key, artifacts_dir="artifacts"):
     if not main or summary["epic_count"] not in {len(main), len(main) + len(branches)}:
         raise RepositoryError(f"{key}: summary epic count does not match generated files")
     epics = [validate_artifact(state, key, path, "epic-task", artifacts_dir) for path in main + branches]
-    if bound_config(state).planning.repository_policy:
+    if bound_config(state).repository_policy:
         from repository_plan import validate_epic_scopes
         plan = repository_plan_for(state, key, artifacts_dir)
         if summary.get("mapping_snapshot_digest") != plan["mapping_snapshot_digest"]:
@@ -163,7 +163,7 @@ def validate_inputs(state, phase, ids):
         return
     for key in ids:
         source_metadata(state, key)
-        if bound_config(state).planning.repository_policy:
+        if bound_config(state).repository_policy:
             repository_plan_for(state, key, prepare=phase == "PLAN_REPOSITORIES")
         if phase in ("REVIEW_DECOMP", "RE_REVIEW", "REVISE_DECOMP", "RE_REVISE"):
             validate_decomposition(state, key)

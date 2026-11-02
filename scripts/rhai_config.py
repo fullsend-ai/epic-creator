@@ -4,13 +4,13 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from types import SimpleNamespace
 
 from jsonschema import Draft202012Validator
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config/rhai-repositories.yaml"
+COMPONENT_FILE = ".context/rhai-components.txt"
 
 
 class RepositoryError(ValueError):
@@ -22,14 +22,15 @@ def _digest(data):
 
 
 @dataclass(frozen=True)
-class Planning:
-    repository_policy: dict | None
+class RhaiConfig:
+    version: int
     digest: str
-    component_file: str = ".context/rhai-components.txt"
+    planning_digest: str
+    repository_policy: dict | None
 
     def canonical_components(self):
         try:
-            names = {s.strip() for s in Path(self.component_file).read_text().splitlines() if s.strip()}
+            names = {s.strip() for s in Path(COMPONENT_FILE).read_text().splitlines() if s.strip()}
         except OSError:
             raise RepositoryError("Run scripts/fetch_components.py before repository planning") from None
         if not names:
@@ -40,35 +41,14 @@ class Planning:
         if name not in (self.canonical_components() if names is None else names):
             raise RepositoryError(f"Unknown RHAI component: {name}")
 
-
-@dataclass(frozen=True)
-class RhaiConfig:
-    version: int
-    digest: str
-    planning: Planning
-    id: str = "rhai"
-    project: str = "RHAISTRAT"
-    issue_type: str = "Feature"
-    id_pattern: str = r"RHAISTRAT-\d+"
-    processed_label: str = "epic-creator-auto-decomposed"
-
-    @property
-    def submission(self):
-        return SimpleNamespace(project="RHAI", issue_type="Epic", parent={"relation": "parent"},
-            dependency_link_type="Blocks", labels={"created": "epic-creator-auto-created",
-            "investigation": "epic-creator-investigation", "implementation_prefix": "epic-creator-impl-",
-            "ai_prefix": "epic-creator-ai-impl-", "needs_component": "epic-creator-needs-component"})
-
-    def validate_identity(self, key, project=None, issue_type=None):
-        if not isinstance(key, str) or re.fullmatch(self.id_pattern, key) is None:
+    def validate_identity(self, key):
+        if not isinstance(key, str) or re.fullmatch(r"RHAISTRAT-\d+", key) is None:
             raise RepositoryError("Repository mode requires a RHAISTRAT strategy")
-        if project is not None and (project, issue_type) != (self.project, self.issue_type):
-            raise RepositoryError("Unexpected RHAISTRAT source project or issue type")
 
     def validate_ready(self, issue):
         fields = issue.get("fields", {})
-        self.validate_identity(issue.get("key"), fields.get("project", {}).get("key"), fields.get("issuetype", {}).get("name"))
-        if fields.get("project", {}).get("key") != self.project or fields.get("issuetype", {}).get("name") != self.issue_type:
+        self.validate_identity(issue.get("key"))
+        if fields.get("project", {}).get("key") != "RHAISTRAT" or fields.get("issuetype", {}).get("name") != "Feature":
             raise RepositoryError("Missing or invalid RHAISTRAT source identity")
         if not {"strat-creator-rubric-pass", "strat-creator-human-sign-off"} <= set(fields.get("labels", [])):
             raise RepositoryError("Strategy is missing approval labels")
@@ -94,7 +74,7 @@ def load_config(path=None):
         prompts = ROOT / "skills/epic-decompose/prompts"
         prompt_content = {p.name: p.read_text() for p in prompts.glob("*.md")}
         return RhaiConfig(version=data["schema_version"], digest=_digest(data),
-            planning=Planning(policy if data["enabled"] else None,
-                              _digest({"configuration": data, "prompts": prompt_content})))
+            repository_policy=policy if data["enabled"] else None,
+            planning_digest=_digest({"configuration": data, "prompts": prompt_content}))
     except (OSError, yaml.YAMLError, TypeError, KeyError) as exc:
         raise RepositoryError("Cannot load the fixed RHAI repository configuration") from exc

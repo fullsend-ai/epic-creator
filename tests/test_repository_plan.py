@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from repository_fixtures import ROOT, configured, git_source, module, proposal, strategy
+from repository_fixtures import ROOT, configured, git_source, module, proposal, strategy, epic_metadata
 from rhai_config import RepositoryError
 
 
@@ -38,6 +38,16 @@ def test_cross_repo_work_keeps_real_dependency(inputs):
     assert len(plan["scopes"]) == 2
     by_repo = {s["target_repository"]["inventory_key"]: s for s in plan["scopes"]}
     assert by_repo["dashboard"]["dependencies"] == [by_repo["operator"]["scope_id"]]
+
+
+def test_epic_gate_must_match_its_repository_scope(inputs):
+    context, draft = inputs
+    api = module("repository_plan")
+    plan = api.finalize_repository_plan(context, draft)
+    epics = epic_metadata(plan)
+    epics[0]["gated_by"] = "RHAISTRAT-9001-E999"
+    with pytest.raises(RepositoryError, match="gate"):
+        api.validate_epic_scopes(plan, epics)
 
 
 @pytest.mark.parametrize("destination,count", [("operator", 1), ("guidelines", 2)])

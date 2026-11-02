@@ -20,7 +20,7 @@ import rhai_config
 def setup_pipeline(monkeypatch, tmp_path, capsys):
     repo = git_source(tmp_path)
     selected = configured(repo)
-    components = tmp_path / selected.planning.component_file
+    components = tmp_path / rhai_config.COMPONENT_FILE
     components.parent.mkdir(parents=True, exist_ok=True)
     components.write_text("Operator\nCloudmanager\n")
     monkeypatch.setattr(rhai_config, "load_config", lambda *a, **k: selected)
@@ -28,7 +28,7 @@ def setup_pipeline(monkeypatch, tmp_path, capsys):
     body = source.read_text()
     monkeypatch.chdir(tmp_path)
     metadata = dict(strat_id=source.stem, title="Operator logging", labels=["strat-creator-rubric-pass", "strat-creator-human-sign-off"],
-                    rhai_config_digest=selected.digest, planning_digest=selected.planning.digest,
+                    rhai_config_digest=selected.digest, planning_digest=selected.planning_digest,
                     source_revision=hashlib.sha256(body.strip().encode()).hexdigest())
     write_artifact(source, metadata, "strat-task", body=body)
     monkeypatch.chdir(tmp_path)

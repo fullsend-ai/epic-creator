@@ -54,7 +54,7 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
     fields = issue_data["fields"]
     from rhai_config import load_config
     selected = load_config()
-    repository_mode = bool(selected.planning.repository_policy)
+    repository_mode = bool(selected.repository_policy)
     if repository_mode:
         selected.validate_ready(issue_data)
     title = fields.get("summary", "")
@@ -123,7 +123,7 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
     if attachment_source:
         frontmatter["attachment_source"] = attachment_source
     if repository_mode:
-        frontmatter.update(rhai_config_digest=selected.digest, planning_digest=selected.planning.digest,
+        frontmatter.update(rhai_config_digest=selected.digest, planning_digest=selected.planning_digest,
                            source_revision=hashlib.sha256(description.encode()).hexdigest())
         if exact_attachment:
             if not attachment_source:

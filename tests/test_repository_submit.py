@@ -20,7 +20,7 @@ from jira_transport import Jira
 def publication(monkeypatch, tmp_path, capsys, request):
     selected, source = setup_pipeline(monkeypatch, tmp_path, capsys)
     if getattr(request, "param", False):
-        policy = selected.planning.repository_policy
+        policy = selected.repository_policy
         repo = Path(policy["sources"][0]["url"].removeprefix("file://"))
         (repo / "planning.md").write_text("Read mapping.md for ownership; architecture.json explains component boundaries.\n")
         git(repo, "add", ".")
@@ -42,7 +42,7 @@ def publication(monkeypatch, tmp_path, capsys, request):
         "decomp-review", body="Reviewed repository scope and acceptance coverage\n")
     jira = Jira()
     jira.issues[source.stem] = {"key": source.stem, "fields": {
-        "project": {"key": selected.project}, "issuetype": {"name": selected.issue_type},
+        "project": {"key": "RHAISTRAT"}, "issuetype": {"name": "Feature"},
         "labels": ["strat-creator-rubric-pass", "strat-creator-human-sign-off"], "assignee": None, "issuelinks": [],
         "description": artifacts.read_frontmatter(source)[1].strip(), "attachment": []}}
     monkeypatch.setattr("urllib.request.urlopen", jira.urlopen)
@@ -54,9 +54,33 @@ def publication(monkeypatch, tmp_path, capsys, request):
 
 def run(monkeypatch, source, *, explicit=True):
     monkeypatch.setattr(sys, "argv", ["submit.py", source.stem])
-    with pytest.raises(SystemExit) as result:
+    try:
         submit.main()
-    return result.value.code
+    except SystemExit as result:
+        return result.code
+    return 0
+
+
+def test_shared_epic_creator_preserves_repository_scope(publication):
+    selected, source, _, _, jira = publication
+    plan = repository_submit.preflight(selected, source.stem, Path("artifacts"))["plan"]
+    keys, errors = submit._create_epics("https://jira.example.test", "synthetic", "synthetic", plan, source.stem)
+    assert errors == 0
+    fields = jira.issues[keys[f"{source.stem}-E001"]]["fields"]
+    assert fields["components"] == [{"name": "Operator"}, {"name": "Cloudmanager"}]
+    assert "https://github.com/example/operator" in json.dumps(fields["description"])
+    assert "target-repo-operator" in fields["labels"]
+
+
+def test_empty_repository_batch_is_successful(publication, monkeypatch):
+    _, _, _, _, jira = publication
+    Path("artifacts/epic-tasks").rename("artifacts/prepared-epics")
+    monkeypatch.setattr(sys, "argv", ["submit.py", "--all"])
+    try:
+        submit.main()
+    except SystemExit as result:
+        assert result.code == 0
+    assert jira.writes == []
 
 
 def test_initial_create_contains_matching_target_and_all_components(publication, monkeypatch):
@@ -139,6 +163,53 @@ def test_lost_create_response_recovers_same_target(publication, monkeypatch):
     assert run(monkeypatch, source) == 0
     assert set(jira.issues) == {source.stem, "RHAI-1"}
     assert "keep-me" in jira.issues["RHAI-1"]["fields"]["labels"]
+
+
+@pytest.mark.parametrize("search", ["hidden", "incomplete"])
+def test_uncertain_create_is_not_repeated_without_a_complete_match(publication, monkeypatch, search):
+    _, source, _, _, jira = publication
+    jira.failure = (("POST", "/issue"), "after")
+    assert run(monkeypatch, source) == 1
+    setattr(jira, search, True)
+    before = list(jira.writes)
+    assert run(monkeypatch, source) == 1
+    assert jira.writes == before
+    assert set(jira.issues) == {source.stem, "RHAI-1"}
+
+
+def test_failed_evidence_upload_does_not_mark_strategy_complete(publication, monkeypatch):
+    _, source, _, _, jira = publication
+    jira.failure = (("POST", "/issue/RHAI-1/attachments"), "after")
+    assert run(monkeypatch, source) == 1
+    assert "epic-creator-auto-decomposed" not in jira.issues[source.stem]["fields"]["labels"]
+    assert run(monkeypatch, source) == 0
+    assert "epic-creator-auto-decomposed" in jira.issues[source.stem]["fields"]["labels"]
+    assert set(jira.issues) == {source.stem, "RHAI-1"}
+
+
+def test_conditional_repository_plan_is_attached_to_its_investigation(publication, monkeypatch):
+    _, source, context, _, jira = publication
+    draft = proposal(context)
+    draft["work_items"][0]["kind"] = "investigation"
+    draft["work_items"][0].pop("resolution")
+    draft["work_items"][1].update(branch="A", gated_by="W1", depends_on=["W1"])
+    plan = repository_plan.finalize_repository_plan(context, draft)
+    repository_plan.atomic_json(repository_plan.paths("artifacts", source.stem)["plan"], plan)
+    metadata = write_repository_decomposition(source, plan)
+    write_artifact(Path(f"artifacts/epic-reviews/{source.stem}-decomp-review.md"),
+        {**metadata, "strat_id": source.stem, "score": 14, "pass": True, "recommendation": "accept",
+         "repository_plan_digest": plan["digest"],
+         "reviewed_decomposition_digest": repository_plan.decomposition_digest(plan, Path("artifacts"), source.stem)},
+        "decomp-review", body="Reviewed conditional repository scope\n")
+    assert run(monkeypatch, source) == 0
+    assert set(jira.issues) == {source.stem, "RHAI-1"}
+    fields = jira.issues["RHAI-1"]["fields"]
+    assert "epic-creator-investigation" in fields["labels"]
+    assert not any(label.startswith("target-repo-") for label in fields["labels"])
+    assert any("branch-a-plan-" in attachment["filename"] for attachment in fields["attachment"])
+    before = list(jira.writes)
+    assert run(monkeypatch, source) == 0
+    assert jira.writes == before
 
 
 def test_evidence_export_contains_pinned_sources_without_cache_paths(publication):

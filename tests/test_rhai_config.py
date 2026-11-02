@@ -23,9 +23,7 @@ def test_fixed_rhai_config_has_no_descriptor_dependency(tmp_path):
     path = tmp_path / "rhai.yaml"
     path.write_text(yaml.safe_dump({"schema_version": 1, "enabled": True, "repository_policy": policy(repo)}))
     selected = api.load_config(path)
-    assert selected.planning.repository_policy["sources"][0]["url"] == repo.as_uri()
-    assert selected.project == "RHAISTRAT"
-    assert selected.submission.project == "RHAI"
+    assert selected.repository_policy["sources"][0]["url"] == repo.as_uri()
     assert importlib.util.find_spec("workload") is None
     before = selected.digest
     data = yaml.safe_load(path.read_text())
@@ -53,4 +51,4 @@ def test_incomplete_or_unsafe_configuration_is_rejected(tmp_path, change):
 
 def test_disabled_policy_preserves_existing_rhai_behavior():
     selected = config_module().load_config()
-    assert selected.planning.repository_policy is None
+    assert selected.repository_policy is None

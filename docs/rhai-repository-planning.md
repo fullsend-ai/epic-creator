@@ -88,6 +88,13 @@ python3 scripts/submit.py --dry-run RHAISTRAT-1234
 python3 scripts/submit.py RHAISTRAT-1234
 ```
 
+Both modes use the publication phases in `scripts/submit.py`: create epics,
+link dependencies, attach metadata and branch plans, then label the strategy.
+`scripts/repository_submit.py` adds repository preflight and retry recovery to
+those phases; it does not run a separate publisher. Repository configuration
+contains sources and planning policy. Jira projects, issue types and link types
+continue to use Epic Creator's fixed RHAI conventions.
+
 Dry-run performs local validation without Jira writes. Publication also checks
 the current approved Jira source and content before writing. Each initial create
 includes its repository label and all components. Published issues retain the

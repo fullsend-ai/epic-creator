@@ -39,9 +39,9 @@ def test_context_binds_content_and_source_roles(tmp_path):
     source.write_text(source.read_text() + "AC-3: New requirement\n")
     with pytest.raises(RepositoryError, match="changed"):
         api.assert_context_current(context, selected, source)
-    other = deepcopy(selected.planning.repository_policy)
+    other = deepcopy(selected.repository_policy)
     other["sources"][0]["role"] = "supporting"
-    changed = replace(selected, planning=replace(selected.planning, repository_policy=other))
+    changed = replace(selected, repository_policy=other)
     assert api.load_repository_context(changed, source, tmp_path / "other")["digest"] != context["digest"]
 
 
@@ -60,7 +60,7 @@ def test_inventory_aliases_require_declared_contribution_policy(tmp_path, mutate
 def test_unavailable_source_returns_explicit_blocked_context(tmp_path):
     repo = git_source(tmp_path)
     selected, source = configured(repo), strategy(tmp_path)
-    selected.planning.repository_policy["sources"][0]["paths"] = ["absent.yaml"]
+    selected.repository_policy["sources"][0]["paths"] = ["absent.yaml"]
     context = module("repository_context").load_repository_context(selected, source, tmp_path / "artifacts")
     assert context["status"] == "blocked"
     assert context["reason"] == "source_unavailable"
