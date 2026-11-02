@@ -213,6 +213,19 @@ def test_eval_prompt_is_the_production_prompt_under_the_eval_name():
     assert eval_body == prod_body, "prompt-eval.md body drifted from prompt.md: copy it over"
 
 
+def test_prompt_retry_after_done_writes_result_without_restarting():
+    """A validation retry after DONE must return the completed state, not rerun work."""
+    base = _load(PRODUCTION)
+    child = _load(EVAL)
+    for harness in (base, child):
+        _, body = _prompt(FULLSEND_DIR / harness["agent"])
+        assert (
+            "If `tmp/pipeline-state.yaml` exists and its phase is DONE, and Fullsend has\n"
+            "   appended validation feedback, write `agent-result.json` from the completed\n"
+            "   state and exit. Do not restart the task."
+        ) in body
+
+
 def test_config_registers_eval_harness():
     sources = [a.get("source") for a in _load(FULLSEND_DIR / "config.yaml")["agents"]]
     assert "epic-creator/epic-creator.yaml" in sources

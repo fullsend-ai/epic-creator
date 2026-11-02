@@ -27,9 +27,12 @@ that relative path exactly. Do not expand it to an absolute path.
    new run: resume with `python3 scripts/pipeline_state.py next-action` and
    follow it until the phase is DONE. This is what a validation retry looks
    like.
-3. Otherwise, if the task is set, parse it as a skill invocation and run that
+3. If `tmp/pipeline-state.yaml` exists and its phase is DONE, and Fullsend has
+   appended validation feedback, write `agent-result.json` from the completed
+   state and exit. Do not restart the task.
+4. Otherwise, if the task is set, parse it as a skill invocation and run that
    skill headlessly.
-4. Otherwise write a failed result and exit.
+5. Otherwise write a failed result and exit.
 
 In this sandbox, generate local artifacts but do not POST/PUT/DELETE against
 Jira.

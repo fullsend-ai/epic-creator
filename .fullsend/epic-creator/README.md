@@ -99,7 +99,11 @@ runner to `fullsend`, selects `epic-creator-eval`, and removes the baseline's
 Claude Code tool interceptor because the Fullsend sandbox does not receive the
 eval harness interception hooks.
 
-Use `agent-eval-harness >= 1.59.0` and `fullsend >= 0.51.0`; `v0.50.0`
+Fullsend runs the validation loop for two iterations. If validation feedback
+arrives after the pipeline state is already DONE, the agent must write
+`agent-result.json` from that completed state without restarting the task.
+
+Use `agent-eval-harness >= 1.61.0` and `fullsend >= 0.51.0`; `v0.50.0`
 predates the profile canonicalization fix. The run also needs an OpenShell
 gateway and GCP Vertex credentials, just like the production Fullsend path.
 The comparison case can then be run with:
