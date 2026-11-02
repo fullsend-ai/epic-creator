@@ -1980,8 +1980,12 @@ judges:
                       except ValueError:
                           words = []
                       output_only = (
-                          words[:1] == ["fullsend-check-output"]
-                          or words[:3] == ["python3", "scripts/pipeline_state.py", "status"]
+                          (
+                              len(words) == 2
+                              and words[0] == "fullsend-check-output"
+                              and words[1].endswith("agent-result.json")
+                          )
+                          or words == ["python3", "scripts/pipeline_state.py", "status"]
                       )
                   else:
                       output_only = False

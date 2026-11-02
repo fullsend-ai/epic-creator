@@ -251,6 +251,46 @@ def test_dispatcher_turn_discipline_fails_other_resumed_tool_work():
     assert not passed
 
 
+def test_dispatcher_turn_discipline_fails_status_then_run_phase_compound_command():
+    passed, _ = _run_dispatcher_turn_discipline(
+        [
+            _init_event(),
+            _init_event(),
+            _tool_event(
+                "Bash",
+                {
+                    "command": (
+                        "python3 scripts/pipeline_state.py status && "
+                        "python3 scripts/pipeline_state.py run-phase"
+                    )
+                },
+            ),
+        ]
+    )
+
+    assert not passed
+
+
+def test_dispatcher_turn_discipline_fails_check_output_then_wait_compound_command():
+    passed, _ = _run_dispatcher_turn_discipline(
+        [
+            _init_event(),
+            _init_event(),
+            _tool_event(
+                "Bash",
+                {
+                    "command": (
+                        "fullsend-check-output agent-result.json; "
+                        "python3 scripts/pipeline_state.py wait-for-wave"
+                    )
+                },
+            ),
+        ]
+    )
+
+    assert not passed
+
+
 def test_dispatcher_turn_discipline_fails_resumed_pipeline_next_action():
     passed, _ = _run_dispatcher_turn_discipline(
         [
