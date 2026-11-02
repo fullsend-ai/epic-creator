@@ -167,9 +167,31 @@ def test_profile_leaves_timeout_and_validation_loop_untouched():
     assert "symlinks" not in merged["execution"]
 
 
+def test_fullsend_timeout_budget_is_explicit():
+    merged = _merge(_load(BASE), _load(PROFILE, ProfileLoader))
+    child_path = REPO / ".fullsend/epic-creator/epic-creator-eval.yaml"
+    child = _load(child_path)
+    production = _load(child_path.parent / child["base"])
+    loop = {**production["validation_loop"], **child.get("validation_loop", {})}
+
+    assert loop["max_iterations"] == 2 and loop["feedback_mode"] == "append"
+    first = child["timeout_minutes"] * 60
+    overhead = 20 * 60
+    assert merged["execution"]["timeout"] >= first + overhead
+    assert loop["max_iterations"] * first > merged["execution"]["timeout"], (
+        "a second full-length iteration now fits execution.timeout: revisit the "
+        "timeout comment and README before relying on it"
+    )
+
+
 def test_dispatcher_turn_discipline_allows_output_only_post_done_retry():
     passed, rationale = _run_dispatcher_turn_discipline(
         [
+            _init_event(),
+            _tool_event(
+                "Bash",
+                {"command": "python3 scripts/pipeline_state.py status"},
+            ),
             _init_event(),
             _tool_event(
                 "Write",
@@ -184,7 +206,49 @@ def test_dispatcher_turn_discipline_allows_output_only_post_done_retry():
     )
 
     assert passed
-    assert "output-only recovery resume" in rationale
+    assert "output-only recovery" in rationale
+
+
+def test_dispatcher_turn_discipline_allows_editing_result_file():
+    passed, _ = _run_dispatcher_turn_discipline(
+        [
+            _init_event(),
+            _init_event(),
+            _tool_event(
+                "Edit",
+                {"file_path": "/tmp/output/agent-result.json", "old_string": "{}", "new_string": "{}"},
+            ),
+        ]
+    )
+
+    assert passed
+
+
+def test_dispatcher_turn_discipline_fails_resumed_pipeline_run_phase():
+    passed, _ = _run_dispatcher_turn_discipline(
+        [
+            _init_event(),
+            _init_event(),
+            _tool_event(
+                "Bash",
+                {"command": "python3 scripts/pipeline_state.py run-phase"},
+            ),
+        ]
+    )
+
+    assert not passed
+
+
+def test_dispatcher_turn_discipline_fails_other_resumed_tool_work():
+    passed, _ = _run_dispatcher_turn_discipline(
+        [
+            _init_event(),
+            _init_event(),
+            _tool_event("Read", {"file_path": "tmp/config.yaml"}),
+        ]
+    )
+
+    assert not passed
 
 
 def test_dispatcher_turn_discipline_fails_resumed_pipeline_next_action():

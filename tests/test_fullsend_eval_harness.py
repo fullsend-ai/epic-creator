@@ -28,6 +28,7 @@ EVAL_SKIP = "1"
 # Every path at which the composed eval harness may differ from the production file.
 EXPECTED_DIFF = {
     "agent",
+    "timeout_minutes",
     "env.sandbox.JIRA_SERVER",
     "env.sandbox.JIRA_USER",
     "env.sandbox.CLAUDE_CODE_SUBAGENT_MODEL",
@@ -36,6 +37,7 @@ EXPECTED_DIFF = {
     "env.runner.JIRA_TOKEN",
     "env.runner.EPIC_SKIP_BOOTSTRAP",
     "env.runner.EPIC_SKIP_COMPONENT_FETCH",
+    "openshell.profiles",
     "providers",
 }
 
@@ -71,6 +73,13 @@ def _compose(base, child):
             }
         elif k == "providers":
             out[k] = _merge_list(base.get(k, []), v, "name")
+        elif k == "openshell":
+            out[k] = {**base.get(k, {}), **v}
+            out[k]["profiles"] = _merge_list(
+                base.get(k, {}).get("profiles", []),
+                v.get("profiles", []),
+                "id",
+            )
         elif v not in (None, "", [], {}):
             out[k] = v
     return out
@@ -98,14 +107,16 @@ def test_eval_base_is_the_production_harness():
 
 def test_eval_sets_only_the_listed_keys():
     child = _load(EVAL)
-    assert set(child) == {"base", "agent", "env", "providers"}, (
+    assert set(child) == {"base", "agent", "timeout_minutes", "env", "openshell", "providers"}, (
         "the eval child inherits everything else from epic-creator.yaml; `model` comes from "
         "`fullsend run --model`"
     )
     assert child["agent"] == "epic-creator/prompt-eval.md"
+    assert child["timeout_minutes"] == 125
     assert set(child["env"]) == {"sandbox", "runner"}
-    # The provider list replaces only the jira entry: nothing else may ride along.
+    # The provider and profile lists replace only the jira entries.
     assert child["providers"] == ["epic-creator/jira-provider-eval.yaml"]
+    assert child["openshell"]["profiles"] == ["epic-creator/jira-profile-eval.yaml"]
 
 
 def test_composed_eval_differs_from_production_only_in_listed_keys():
@@ -117,10 +128,15 @@ def test_composed_eval_differs_from_production_only_in_listed_keys():
 def test_composed_provider_swaps_only_the_jira_entry():
     base = _load(PRODUCTION)
     composed = _compose(base, _load(EVAL))
-    # The base provider entry is replaced; profiles remain byte-for-byte inherited.
+    # The base provider and profile entries are replaced.
     base_providers = [p for p in base["providers"] if _identity(p, "name") != "jira"]
     assert composed["providers"] == base_providers + ["epic-creator/jira-provider-eval.yaml"]
-    assert composed["openshell"]["profiles"] == base["openshell"]["profiles"]
+    base_profiles = [
+        p for p in base["openshell"]["profiles"] if _identity(p, "id") != "jira"
+    ]
+    assert composed["openshell"]["profiles"] == base_profiles + [
+        "epic-creator/jira-profile-eval.yaml"
+    ]
 
 
 def test_eval_values():
@@ -163,15 +179,12 @@ def test_eval_provider_replaces_jira_provider_with_literal_credential():
     ]
 
 
-def test_eval_inherits_production_read_only_jira_profile():
+def test_eval_profile_has_no_egress():
     base = _load(PRODUCTION)
     composed = _compose(base, _load(EVAL))
-    assert composed["openshell"]["profiles"] == base["openshell"]["profiles"]
     (jira_path,) = [p for p in composed["openshell"]["profiles"] if _identity(p, "id") == "jira"]
     profile = _load(FULLSEND_DIR / jira_path)
-    assert profile["endpoints"]
-    assert all(endpoint["enforcement"] == "enforce" for endpoint in profile["endpoints"])
-    assert all(endpoint["access"] == "read-only" for endpoint in profile["endpoints"])
+    assert profile["endpoints"] == []
 
 
 def test_eval_provider_credentials_declared_by_profile():
@@ -219,11 +232,19 @@ def test_prompt_retry_after_done_writes_result_without_restarting():
     child = _load(EVAL)
     for harness in (base, child):
         _, body = _prompt(FULLSEND_DIR / harness["agent"])
+        normalized = " ".join(body.split())
         assert (
-            "If `tmp/pipeline-state.yaml` exists and its phase is DONE, and Fullsend has\n"
-            "   appended validation feedback, write `agent-result.json` from the completed\n"
-            "   state and exit. Do not restart the task."
-        ) in body
+            'the sentence "The previous iteration\'s output failed validation"'
+            in normalized
+        )
+        assert "followed by a `<validation-output>` block" in normalized
+        assert "the task text from `FULLSEND_TASK` is never that signal" in normalized
+        assert "`python3 scripts/pipeline_state.py status`" in normalized
+        assert (
+            "A DONE state without that feedback is left over from an earlier run"
+            in normalized
+        )
+        assert "DONE is the end of the task for `/epic-decompose`" in normalized
 
 
 def test_config_registers_eval_harness():

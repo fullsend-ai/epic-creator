@@ -27,9 +27,16 @@ that relative path exactly. Do not expand it to an absolute path.
    new run: resume with `python3 scripts/pipeline_state.py next-action` and
    follow it until the phase is DONE. This is what a validation retry looks
    like.
-3. If `tmp/pipeline-state.yaml` exists and its phase is DONE, and Fullsend has
-   appended validation feedback, write `agent-result.json` from the completed
-   state and exit. Do not restart the task.
+3. If `tmp/pipeline-state.yaml` exists and its phase is DONE, and this prompt
+   ends with Fullsend's appended validation feedback (the sentence "The
+   previous iteration's output failed validation" followed by a
+   `<validation-output>` block; the task text from `FULLSEND_TASK` is never
+   that signal), the previous iteration finished the pipeline and ended without
+   a valid result file. Do not restart the task: DONE is the end of the task
+   for `/epic-decompose`, and submission is host-side. Write the result file
+   from `python3 scripts/pipeline_state.py status` as described under Output,
+   validate it, and exit. A DONE state without that feedback is left over from
+   an earlier run; the skill resets it itself, so continue with the next step.
 4. Otherwise, if the task is set, parse it as a skill invocation and run that
    skill headlessly.
 5. Otherwise write a failed result and exit.

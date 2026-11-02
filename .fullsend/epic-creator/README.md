@@ -70,6 +70,9 @@ pre-script and post-script. It overrides:
 
 - `agent`: `epic-creator/prompt-eval.md`, which is identical to the production
   prompt except for its frontmatter name and is kept in sync by a test;
+- `timeout_minutes: 125`: one iteration plus sandbox startup, the pre-script,
+  a result-file retry and the post-script fit the eval's 14400 s
+  `execution.timeout`; two full iterations intentionally do not fit;
 
 - `env.sandbox`: `JIRA_SERVER`/`JIRA_USER` as literals, and
   `CLAUDE_CODE_SUBAGENT_MODEL` from `${AGENT_EVAL_SUBAGENT_MODEL}`;
@@ -77,8 +80,9 @@ pre-script and post-script. It overrides:
   host needs no Jira credentials, plus `EPIC_SKIP_BOOTSTRAP=1` and
   `EPIC_SKIP_COMPONENT_FETCH=1`; the inherited pre-script runs on the host before
   `env.sandbox` is applied, and these flags preserve the pre-provisioned eval fixtures;
-- the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential). The
-  production Jira profile is inherited unchanged, including enforced read-only access.
+- the `jira` provider (`jira-provider-eval.yaml`, literal placeholder credential)
+  and OpenShell profile (`jira-profile-eval.yaml`, no endpoints: no Atlassian
+  egress).
 
 OpenShell gateways store provider credentials by provider name. Because the
 production and eval providers are both named `jira`, run evals on a separate
@@ -100,6 +104,10 @@ where `.env` holds the four Vertex variables above plus
 `AGENT_EVAL_SUBAGENT_MODEL=claude-opus-4-6`. No Jira credentials or Epic skip flags are
 needed: the eval child supplies them.
 
+`.fullsend/config.yaml` is rendered by the fleet sync, not edited as the source
+of truth. The eval agent is registered through
+[`fullsend-ai/.fullsend` `repos.yaml`](https://github.com/fullsend-ai/.fullsend/blob/main/repos.yaml).
+
 ### Fullsend evaluation profile
 
 `eval/profiles/fullsend.yaml` layers over `eval/epic-decompose.yaml`. It keeps
@@ -111,14 +119,20 @@ eval harness interception hooks.
 The validation loop allows up to two iterations and appends feedback only when
 validation fails. If feedback arrives after the pipeline state is already DONE,
 the agent must write `agent-result.json` from that completed state without
-restarting the task.
+restarting the task. A second full-length iteration intentionally does not fit
+the eval timeout; the retry exists for a finished pipeline whose result file
+failed validation, not for resuming a pipeline that timed out.
 
 Use `agent-eval-harness >= 1.61.0` and `fullsend >= 0.51.0`; `v0.50.0`
 predates the profile canonicalization fix. The run also needs an OpenShell
 gateway and GCP Vertex credentials, just like the production Fullsend path.
+Keep the OpenShell gateway supervisor and sandbox-runtime images on the same
+OpenShell release; version skew can kill the sandbox boundary before the
+supervisor confirms it.
 The comparison case can then be run with:
 
 ```bash
+unset FULLSEND_SANDBOX_IMAGE FULLSEND_SANDBOX_ARCH
 /eval-run --config eval/profiles/fullsend.yaml \
   --cases case-001-simple-two-component \
   --model claude-opus-4-6

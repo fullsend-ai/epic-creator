@@ -1,14 +1,14 @@
 ---
 # Eval variant of epic-creator.yaml: same prompt, scripts, image, policy, gates
 # (the validation loop's DONE gate, pre-script, post-script), but no production
-# Jira credential and with the models under evaluation injected from outside.
+# Jira credential or Atlassian egress and with the models under evaluation
+# injected from outside.
 # fullsend composes this file over its base (internal/harness/compose.go):
 # non-empty scalars override, env.sandbox / env.runner merge with these keys
-# winning, and the child provider replaces the base entry with the same name.
-# The production Jira access profile is inherited unchanged, but provider
-# credentials are gateway state keyed by provider name. Run evals on a separate
-# OpenShell gateway from production so their `jira` credentials cannot overwrite
-# each other.
+# winning, and the child provider and OpenShell profile replace the base entries
+# with the same name and id. Provider credentials and profiles are gateway state
+# keyed by name and id. Run evals on a separate OpenShell gateway from production
+# so their `jira` entries cannot overwrite each other.
 #
 # `model` is not set: `fullsend run --model` passes the model under evaluation.
 # tests/test_fullsend_eval_harness.py pins this file to the keys below.
@@ -22,6 +22,12 @@ base: epic-creator.yaml
 # prompt.md declares `epic-creator`; prompt-eval.md differs from it only in the
 # frontmatter. A test keeps the two bodies identical.
 agent: epic-creator/prompt-eval.md
+
+# One iteration plus sandbox startup, the pre-script, a result-file retry and
+# the post-script fit the eval's 14400 s execution.timeout. Two full iterations
+# intentionally do not fit; the retry exists for a finished pipeline whose
+# result file failed validation, not for resuming a timed-out pipeline.
+timeout_minutes: 125
 
 env:
   sandbox:
@@ -40,6 +46,10 @@ env:
     EPIC_SKIP_BOOTSTRAP: "1"
     EPIC_SKIP_COMPONENT_FETCH: "1"
 
+openshell:
+  profiles:
+    # Replaces the production Jira profile (id: jira): no Atlassian egress.
+    - epic-creator/jira-profile-eval.yaml
 providers:
   # Replaces the production provider (name: jira) with a literal credential.
   - epic-creator/jira-provider-eval.yaml

@@ -1929,10 +1929,12 @@ judges:
       harness auto-resumes the session; the resumed segment then continues the
       pipeline. Detection parses the RAW stdout stream (outputs["stdout"],
       requires traces.stdout: true): session segments are system/init events,
-      and a violation is any post-first-init segment that resumes pipeline work
-      by calling pipeline_state.py next-action or wait-for-wave, or by
-      launching an Agent. Output-only recovery after DONE — writing or checking
-      agent-result.json — is benign. NOT
+      and a violation is any post-first-init segment that performs tool work
+      outside the output-only recovery allowed after DONE. Only writing or
+      editing agent-result.json, checking that file with fullsend-check-output,
+      and reading pipeline status are benign; any other tool call — including
+      pipeline_state.py next-action, wait-for-wave or run-phase, or an Agent
+      launch — resumes pipeline work and fails. NOT
       events.json: that transform batches all result events at the tail, which
       destroys segment ordering. Calibrated on run 2026-08-19-claude-opus-4-6:
       flags exactly the 8 audited violators (005, 009, 010, 018, 019, 020, 025,
@@ -1940,6 +1942,7 @@ judges:
       segment made no tool calls) and all 21 single-segment cases.
     check: |
       import json
+      import shlex
       stdout_text = outputs.get("stdout") or ""
       if not stdout_text.strip():
           return (True, "no stdout trace captured - not assessable (vacuous pass)")
@@ -1964,18 +1967,25 @@ judges:
                       continue
                   tool_name = block.get("name")
                   tool_input = block.get("input") or {}
-                  command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-                  resumes_pipeline = (
-                      tool_name == "Agent"
-                      or (
-                          "scripts/pipeline_state.py" in command
-                          and (
-                              "next-action" in command
-                              or "wait-for-wave" in command
-                          )
+                  if not isinstance(tool_input, dict):
+                      seq.append("pipeline_work")
+                      continue
+                  if tool_name in ("Write", "Edit"):
+                      output_path = tool_input.get("file_path") or tool_input.get("path") or ""
+                      output_only = output_path.endswith("agent-result.json")
+                  elif tool_name == "Bash":
+                      command = tool_input.get("command", "")
+                      try:
+                          words = shlex.split(command)
+                      except ValueError:
+                          words = []
+                      output_only = (
+                          words[:1] == ["fullsend-check-output"]
+                          or words[:3] == ["python3", "scripts/pipeline_state.py", "status"]
                       )
-                  )
-                  if resumes_pipeline:
+                  else:
+                      output_only = False
+                  if not output_only:
                       seq.append("pipeline_work")
       n_segments = seq.count("init")
       if n_segments <= 1:
@@ -1992,8 +2002,8 @@ judges:
               seg_flagged = True
       if resumed_with_work == 0:
           return (True, "%d session segments but no resumed segment performed "
-                        "pipeline work (benign post-completion or output-only "
-                        "recovery resume)" % n_segments)
+                        "work outside output-only recovery (benign post-completion "
+                        "resume)" % n_segments)
       return (False, "%d session segments, %d resumed mid-pipeline: the dispatcher "
                      "ended its turn while pipeline work remained and relied on "
                      "harness auto-resume instead of the blocking wait-for-wave "
