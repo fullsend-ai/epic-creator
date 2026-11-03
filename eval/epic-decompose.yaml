@@ -145,21 +145,20 @@ dataset:
       - notes: optional free-text expectations (e.g. key HLRs, expected epic
         count range) available to LLM judges via {{ annotations }}.
 
-# Bootstrap scripts call external services over raw HTTP (urllib/curl), so they
-# cannot be observed as MCP tool calls — intercept the Bash invocations instead.
-# fetch-architecture-context.sh is already neutralized via EPIC_SKIP_BOOTSTRAP=1.
+# fetch_strategy.py calls Jira over raw HTTP (urllib), so it cannot be observed
+# as an MCP tool call — intercept its Bash invocation instead. The bootstrap
+# scripts are already neutralized through their skip environment variables.
 inputs:
   tools:
     - match: |
-        Bash commands that run scripts/fetch_components.py or scripts/fetch_strategy.py
-        (Jira REST API calls for the RHAI component list or RHAISTRAT strategy issues).
+        Bash commands that run scripts/fetch_strategy.py
+        (Jira REST API calls for RHAISTRAT strategy issues).
       prompt: |
-        This eval workspace pre-provisions everything these scripts would fetch:
-        .context/rhai-components.txt and artifacts/strat-tasks/<strat_id>.md already
-        exist on disk. Deny the command and tell the agent: the file this script
-        writes is already present in the workspace — verify with ls, treat this
-        bootstrap/fetch step as SUCCESSFUL, and proceed to the next pipeline step.
-        Do not retry the script and do not stop with "bootstrap failed".
+        This eval workspace pre-provisions artifacts/strat-tasks/<strat_id>.md.
+        Deny the command and tell the agent: the strategy file this script would
+        fetch is already present in the workspace — verify with ls, treat this
+        fetch step as SUCCESSFUL, and proceed to the next pipeline step. Do not
+        retry the script and do not stop with "bootstrap failed".
 
 outputs:
   # artifacts/strat-tasks is deliberately NOT an output path — it holds the
@@ -1901,9 +1900,9 @@ judges:
          ran as teardown (SKILL.md "Teardown").
 
       Environment notes, neither of which is a violation:
-      - The bootstrap network scripts (fetch_components.py, fetch_strategy.py) may have
-        been denied by the eval harness with a message that the files are pre-provisioned.
-        Proceeding past that denial is CORRECT behavior.
+      - fetch_strategy.py may have been denied by the eval harness with a message
+        that its strategy file is pre-provisioned. Proceeding past that denial is
+        CORRECT behavior.
       - Re-running `pipeline_state.py init`, re-writing the ID lists, or `cd`-ing and
         running diagnostic commands to recover from a working-directory or provisioning
         problem violates none of the six requirements — including the diagnostics that
