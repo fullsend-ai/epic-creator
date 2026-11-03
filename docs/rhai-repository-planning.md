@@ -78,9 +78,16 @@ automatically; run planning, drafting and review again.
 
 When a strategy names repositories, those names constrain the work they refer to;
 the planner still checks them against the approved inventory and evidence.
-Missing, conflicting or ambiguous destinations remain unresolved and block drafts
-for that strategy. Other strategies in the batch continue. Run reports retain the
-blocking status and repository-plan location.
+Missing, conflicting or ambiguous destinations remain unresolved. They block the
+entire planned PR and its transitive dependents, while independent PRs and
+Investigations proceed. All work in a blocked PR stays pending together; no
+partial Epic is created for that PR. The full plan retains every source work
+item and blocking reason. A partial plan sets `ready_for_drafting: true` and
+`partial: true` and exposes only eligible `scopes` to drafting, review and
+submission. Reports show `partial`, retain the blockers and do not claim complete
+strategy coverage. With no eligible scopes, planning remains blocked entirely.
+Invalid source bindings, evidence or globally conflicting plans still fail
+closed.
 
 For troubleshooting a single fetched strategy:
 
@@ -91,8 +98,8 @@ python3 scripts/repository_plan.py finalize --source RHAISTRAT-1234
 python3 scripts/repository_plan.py validate --source RHAISTRAT-1234
 ```
 
-Finalization returns 0 for a ready plan, 2 for retained unresolved work, and 1 for
-malformed output. The dispatcher prepares the context automatically. Do not edit
+Finalization returns 0 when eligible scopes are ready (including partial plans),
+2 when drafting is entirely blocked, and 1 for malformed output. The dispatcher prepares the context automatically. Do not edit
 the final plan or its cached evidence by hand.
 
 ## Review and publish
@@ -121,7 +128,9 @@ Dry-run performs local validation without Jira writes. Publication also checks
 the current approved Jira source and content before writing. Each initial create
 includes its repository label and all components. Published issues retain the
 canonical target, source hashes, inventory revision, scope and work evidence.
-Conditional branch plans are attached to their Investigation gate.
+Conditional branch plans are attached to their Investigation gate. Publishing
+eligible Epics from a partial plan does not apply the source's fully decomposed
+label. The unresolved work remains recorded for later planning and review.
 
 Keep `artifacts/submissions/` across retries. The publisher journals creation
 intent before sending a create request and recovers only an issue matching the

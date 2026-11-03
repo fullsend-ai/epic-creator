@@ -12,6 +12,13 @@ Output: artifacts/epic-reviews/{ID}-decomp-review.md
 
 ## Repository scope review (when REPOSITORY_PLAN is supplied)
 
+For a partial plan, review exactly the eligible `scopes`. Work in `unresolved`
+and its blocked dependents must be reported as pending in the summary, without
+Epic files. That explicit pending work is not a missing-coverage defect in the
+available Epics. Fail missing eligible scope/work/ACs, fabricated targets, extra
+Epics for blocked work, or claims that the entire strategy is complete. A passing
+review covers the eligible Epics only; remaining blockers stay unresolved.
+
 Read the bound plan/context and the original strategy before scoring. Verify
 exactly one Implementation Epic per planned PR scope in every effective scenario,
 correct canonical target and all assigned work IDs. Read the actual epic prose:

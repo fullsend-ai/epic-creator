@@ -315,7 +315,8 @@ def render_strategy_section(strat_id):
             plan = json.loads(plan_path.read_text())
             context = json.loads(plan_path.with_name(f"{strat_id}-context.json").read_text())
             reasons = ", ".join(item["reason"] for item in plan.get("unresolved", []))
-            repository_status = (f'<p>Repository planning: {"ready" if plan.get("ready_for_drafting") else "blocked"}; '
+            planning_status = "partial" if plan.get("partial") else "ready" if plan.get("ready_for_drafting") else "blocked"
+            repository_status = (f'<p>Repository planning: {planning_status}; '
                                  f'inventory revision: {_html_escape(context.get("inventory_revision", "unavailable"))}'
                                  f'{"; " + _html_escape(reasons) if reasons else ""}</p>')
         except (OSError, ValueError, KeyError):

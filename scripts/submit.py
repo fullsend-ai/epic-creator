@@ -613,13 +613,17 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         for entry in pending:
             print(f"    - {entry['epic_id']}: {entry['title'][:60]}")
         print("  [DRY RUN] Would attach frontmatter to each epic")
-        print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
+        if repository_submission is not None and repository_submission.get("unresolved"):
+            print("  [DRY RUN] Source remains incomplete: unresolved planned PRs")
+        else:
+            print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
         return len(pending), 0
 
     if repository_submission is not None:
         from repository_submit import publication
         with publication(repository_submission, Path(artifacts_dir), (server, user, token)) as (create, assignee):
-            return _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee, create)
+            return _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee, create,
+                                     source_complete=not bool(repository_submission.get("unresolved")))
 
     failure = None
     recovery = (
@@ -654,7 +658,7 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     return _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee_id)
 
 
-def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee_id, create=None):
+def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assignee_id, create=None, *, source_complete=True):
     """One publication flow for ordinary and repository-oriented epics."""
 
     # Phase 1: Create epic issues as children of strategy (idempotent)
@@ -687,7 +691,7 @@ def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assign
 
     # Phase 5: Label source strategy (only when ALL epics are created)
     all_created = len(id_to_jira_key) == len(plan)
-    if all_created and not errors:
+    if all_created and not errors and source_complete:
         print("  Phase 5: Labeling source strategy...")
         repository_bound = any("repository_label" in entry for entry in plan)
         already_labeled = (repository_bound and STRAT_LABEL in

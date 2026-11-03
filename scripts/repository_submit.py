@@ -103,6 +103,7 @@ def preflight(selected, key, root):
         entry["labels"] = desired["labels"]
         entry.update(identity=identity, fingerprint=fingerprint, description_adf=desired["description_adf"], desired=desired)
     return {"key": key, "plan": plan, "branches": branches, "metadata": metadata,
+            "unresolved": repository_plan["unresolved"],
             "repository_context": repository_context,
             "source_body": artifacts.read_frontmatter(root / f"strat-tasks/{key}.md")[1].strip()}
 

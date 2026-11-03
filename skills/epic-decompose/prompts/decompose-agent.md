@@ -14,7 +14,13 @@ Read the completed repository plan before drafting any epic. It is the binding
 boundary contract: create exactly one Epic per planned PR scope, covering every assigned
 work item and its repo-local acceptance conditions. Do not first create component
 or subsystem epics and attach targets afterward. Never change the bound inventory,
-plan, source snapshots or validation code. An unresolved plan blocks drafting.
+plan, source snapshots or validation code. Draft only the finalized `scopes`.
+A partial plan may contain `unresolved` work: it blocks only the affected PRs
+and their dependents, which the finalizer excludes from `scopes`. Create no
+Epics for excluded work and never guess its target. List each blocked work ID,
+planned PR, reason and dependent work in the summary, keeping that source work
+explicitly pending. Do not claim the whole strategy is covered. A plan with
+`ready_for_drafting: false` still blocks drafting entirely.
 Write only epic artifacts, signal rationale sidecars and the decomposition
 summary during this phase. Do not write or pre-complete review artifacts; the
 review worker evaluates the drafts independently in the following phase.

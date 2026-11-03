@@ -157,8 +157,33 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
             if expected is None or destinations.get(wid) != expected:
                 unresolved.append({"work_item_id": wid, "reason": "explicit_repository_conflict",
                                    "candidates": [expected] if expected else []})
+    # A missing destination blocks its whole PR and all transitive dependents,
+    # while independent PRs and Investigations remain available for drafting.
+    blocked = {entry["work_item_id"] for entry in unresolved if entry["work_item_id"] is not None}
+    pr_members = defaultdict(set)
+    for item in items.values():
+        if item["kind"] == "implementation":
+            pr_members[item["planned_pr"]].add(item["id"])
+    while True:
+        added = False
+        for item in items.values():
+            if item["id"] in blocked:
+                continue
+            peers = pr_members[item["planned_pr"]] if item["kind"] == "implementation" else set()
+            peer_blockers = peers & blocked
+            dependency_blockers = set(item["depends_on"]) & blocked
+            if peer_blockers or dependency_blockers:
+                blocked.add(item["id"])
+                unresolved.append({"work_item_id": item["id"],
+                    "reason": "planned_pr_blocked" if peer_blockers else "dependency_unresolved",
+                    "blocked_by": sorted(peer_blockers | dependency_blockers), "candidates": []})
+                added = True
+        if not added:
+            break
     groups = defaultdict(list)
     for item in items.values():
+        if item["id"] in blocked:
+            continue
         if item["kind"] == "investigation":
             scope_id = f"investigation/{item['id']}"
         elif item["id"] not in destinations:
@@ -200,11 +225,12 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
             unresolved.append({"work_item_id": None, "reason": "conditional_dependency_conflict", "candidates": []})
         elif not _acyclic({s["scope_id"]: s["dependencies"] for s in scenario}):
             unresolved.append({"work_item_id": None, "reason": "repository_dependency_cycle", "candidates": []})
+    ready = bool(scopes) and not any(entry["work_item_id"] is None for entry in unresolved)
     payload = {"schema_version": 1, "source_key": proposal["source_key"],
                "mapping_snapshot_digest": context["digest"], "proposal": proposal,
                "requirements": proposal["requirements"], "work_items": proposal["work_items"],
                "scopes": scopes, "unresolved": unresolved, "complete": True,
-               "ready_for_drafting": not unresolved}
+               "ready_for_drafting": ready, "partial": ready and bool(unresolved)}
     return {**payload, "digest": digest(payload)}
 
 

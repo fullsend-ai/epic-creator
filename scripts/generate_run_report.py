@@ -45,6 +45,7 @@ def main():
                 planning = json.loads(repository_plan.read_text())
                 entry["repository_planning"] = {
                     "ready": planning.get("ready_for_drafting", False),
+                    "partial": planning.get("partial", False),
                     "mapping_snapshot_digest": planning.get("mapping_snapshot_digest"),
                     "scopes": planning.get("scopes", []),
                     "unresolved": planning.get("unresolved", []),
@@ -76,6 +77,10 @@ def main():
         if terminal:
             entry["status"] = terminal["status"]
             entry["error"] = terminal.get("message", "Repository planning blocked")
+        if (entry.get("repository_planning", {}).get("partial")
+                and entry["status"] in {"passed", "decomposed"}):
+            entry["review_status"] = entry["status"]
+            entry["status"] = "partial"
         results.append(entry)
 
     report = {

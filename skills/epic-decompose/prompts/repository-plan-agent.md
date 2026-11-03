@@ -122,7 +122,11 @@ python3 scripts/repository_plan.py finalize --source {ID}
 
 It groups work by explicit planned PR, enforces a single canonical repository
 per PR, and validates coverage/dependencies before
-writing a completed plan atomically. Exit 0 means ready for drafting; exit 2 means
-valid unresolved output retained for reporting; exit 1 means malformed output that
+writing a completed plan atomically. Unresolved work blocks its entire planned
+PR and transitive dependents, while independent scopes can proceed. Preserve
+unresolved work in the proposal; never drop it or select a default destination.
+Exit 0 means eligible scopes are ready for drafting, possibly with `partial: true`
+and explicit remaining blockers. Exit 2 means no scopes are eligible or there is
+a global plan conflict; valid unresolved output is retained for reporting; exit 1 means malformed output that
 you must fix before finishing. Do not edit the final plan yourself or mark an
 unresolved result ready. Do not return a text-only completion summary.
