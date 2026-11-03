@@ -50,7 +50,7 @@ def git_source(tmp_path):
 
 
 def policy(repo):
-    return {"mode": "one-implementation-epic-per-repository",
+    return {"mode": "one-implementation-epic-per-planned-pr",
             "inventory": {"source_id": "mapping", "path": "inventory.yaml"},
             "sources": [{"id": "mapping", "url": repo.as_uri(), "ref": "main",
                          "paths": ["inventory.yaml", "mapping.md", "architecture.json"],
@@ -108,6 +108,7 @@ def proposal(context):
                                  ("AC-2", "acceptance", "AC-2: Cloudmanager log tests pass.")]],
             "work_items": [
                 {"id": f"W{n}", "kind": "implementation", "description": desc,
+                 "planned_pr": "PR-operator",
                  "requirement_refs": [f"HLR-{n}"], "acceptance_refs": [f"AC-{n}"],
                  "acceptance_criteria": [{"source_ref": f"AC-{n}", "text": f"{desc} tests pass"}],
                  "priority": "P0", "component": component, "team": team,

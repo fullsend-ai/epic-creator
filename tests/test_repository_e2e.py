@@ -137,6 +137,7 @@ def prepared_worker(w, phase, agent, *, cross=False):
                 {"id": "AC-3", "kind": "acceptance", "quote": "AC-3: Dashboard UI status test passes."}]
             item = deepcopy(result["work_items"][0])
             item.update(id="W3", description="Dashboard UI status", component="Dashboard", team="Dashboard",
+                        planned_pr="PR-dashboard",
                         requirement_refs=["HLR-3"], acceptance_refs=["AC-3"],
                         acceptance_criteria=[{"source_ref": "AC-3", "text": "Dashboard UI status test passes."}], depends_on=["W1"])
             json_only = "mapping.md" not in context["sources"][0]["files"]
@@ -218,6 +219,42 @@ def test_cli_rejects_stale_input_and_recovers_lost_response(tmp_path, local_jira
         assert len([k for k in local_jira.issues if k != w.key]) == 1
     else:
         assert not local_jira.writes
+
+
+def test_three_planned_prs_create_three_epics_in_two_repositories(tmp_path, local_jira, certificate):
+    w = Workspace(tmp_path / "run", local_jira, certificate, cross=True)
+
+    def worker(phase, agent):
+        prepared_worker(w, phase, agent, cross=True)
+        if phase == "PLAN_REPOSITORIES":
+            path = w.path / f"artifacts/repository-plans/{w.key}-proposal.json"
+            draft = json.loads(path.read_text())
+            draft["work_items"][1].update(planned_pr="PR-cloudmanager", depends_on=["W1"])
+            draft["work_items"][2]["depends_on"] = ["W2"]
+            path.write_text(json.dumps(draft))
+            w.cli("repository_plan", "finalize", "--source", w.key)
+
+    w.pipeline(worker=worker)
+    w.submit("--dry-run")
+    assert not local_jira.writes
+    w.submit()
+
+    created = {key: issue["fields"] for key, issue in local_jira.issues.items() if key != w.key}
+    assert len(created) == 3
+    assert all(fields["issuetype"] == {"name": "Epic"} for fields in created.values())
+    assert sum("target-repo-operator" in fields["labels"] for fields in created.values()) == 2
+    assert sum("target-repo-dashboard" in fields["labels"] for fields in created.values()) == 1
+    manager = next(key for key, fields in created.items()
+                   if "Manager logging tests pass" in json.dumps(fields["description"]))
+    cloudmanager = next(key for key, fields in created.items()
+                        if "Cloudmanager logging tests pass" in json.dumps(fields["description"]))
+    dashboard = next(key for key, fields in created.items()
+                     if "Dashboard UI status test passes" in json.dumps(fields["description"]))
+    assert ("Blocks", manager, cloudmanager) in local_jira.links
+    assert ("Blocks", cloudmanager, dashboard) in local_jira.links
+    before = deepcopy(local_jira.writes)
+    w.submit()
+    assert local_jira.writes == before
 
 
 def test_unresolved_work_is_reported_without_drafting(tmp_path, local_jira, certificate):

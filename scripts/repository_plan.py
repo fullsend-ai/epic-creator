@@ -1,4 +1,4 @@
-"""Resolve work into repository scopes before epic drafting and publication."""
+"""Resolve work into single-repository planned PRs before epic creation."""
 from __future__ import annotations
 
 import argparse
@@ -157,8 +157,6 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
             if expected is None or destinations.get(wid) != expected:
                 unresolved.append({"work_item_id": wid, "reason": "explicit_repository_conflict",
                                    "candidates": [expected] if expected else []})
-    main_targets = {destinations[i["id"]] for i in items.values()
-                    if i["id"] in destinations and not i.get("branch")}
     groups = defaultdict(list)
     for item in items.values():
         if item["kind"] == "investigation":
@@ -166,14 +164,19 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
         elif item["id"] not in destinations:
             continue
         else:
-            target = destinations[item["id"]]
-            suffix = f"{item['gated_by']}/{item['branch']}/" if item.get("branch") and target not in main_targets else ""
-            scope_id = f"repo/{suffix}{target}"
+            scope_id = f"pr/{item['planned_pr']}"
         groups[scope_id].append(item)
     item_scope = {item["id"]: scope_id for scope_id, members in groups.items() for item in members}
     scopes = []
     for scope_id, members in sorted(groups.items()):
         first = members[0]
+        if first["kind"] == "implementation":
+            targets = {destinations[item["id"]] for item in members}
+            if len(targets) != 1:
+                raise RepositoryError("A planned PR must target a single repository")
+            conditions = {(item.get("branch"), item.get("gated_by")) for item in members}
+            if len(conditions) != 1:
+                raise RepositoryError("A planned PR must have one consistent conditional branch/gate")
         components = list(dict.fromkeys(i["component"] for i in members))
         types = {i["delivery_type"] for i in members}
         scope = {"scope_id": scope_id, "kind": first["kind"],
@@ -185,17 +188,14 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                                          if dep in item_scope and item_scope[dep] != scope_id})}
         if first["kind"] == "implementation":
             entry = inventory[destinations[first["id"]]]
+            scope["planned_pr"] = first["planned_pr"]
             scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
             scope["target_label"] = entry["label"]
-            if first.get("branch") and destinations[first["id"]] not in main_targets:
+            if first.get("branch"):
                 scope.update(branch=first["branch"], gated_by=item_scope[first["gated_by"]])
         scopes.append(scope)
     for scenario in _scenarios(scopes):
         ids = {scope["scope_id"] for scope in scenario}
-        targets = [tuple(scope["target_repository"][name] for name in TARGET_FIELDS)
-                   for scope in scenario if scope["kind"] == "implementation"]
-        if len(targets) != len(set(targets)):
-            unresolved.append({"work_item_id": None, "reason": "conditional_repository_collision", "candidates": []})
         if any(dep not in ids for scope in scenario for dep in scope["dependencies"]):
             unresolved.append({"work_item_id": None, "reason": "conditional_dependency_conflict", "candidates": []})
         elif not _acyclic({s["scope_id"]: s["dependencies"] for s in scenario}):

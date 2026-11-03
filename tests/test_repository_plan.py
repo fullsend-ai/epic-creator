@@ -33,6 +33,7 @@ def test_manager_cloudmanager_grouped_before_epic_files_exist(inputs, tmp_path):
 def test_cross_repo_work_keeps_real_dependency(inputs):
     context, draft = inputs
     draft["work_items"][1]["resolution"]["target_key"] = "dashboard"
+    draft["work_items"][1]["planned_pr"] = "PR-dashboard"
     draft["work_items"][1]["depends_on"] = ["W1"]
     plan = module("repository_plan").finalize_repository_plan(context, draft)
     assert len(plan["scopes"]) == 2
@@ -55,6 +56,8 @@ def test_documentation_follows_publication_repo(inputs, destination, count):
     context, draft = inputs
     draft["work_items"][1].update(delivery_type="docs-authoring")
     draft["work_items"][1]["resolution"]["target_key"] = destination
+    if destination != "operator":
+        draft["work_items"][1]["planned_pr"] = "PR-docs"
     plan = module("repository_plan").finalize_repository_plan(context, draft)
     assert len(plan["scopes"]) == count
     if count == 1:
@@ -80,17 +83,20 @@ def test_acceptance_checks_can_also_trace_assigned_requirements(inputs):
     assert module("repository_plan").finalize_repository_plan(context, draft)["ready_for_drafting"]
 
 
-def test_independent_conditional_gates_cannot_duplicate_one_repository(inputs):
+def test_independent_conditional_gates_can_have_distinct_prs_in_one_repository(inputs):
     context, draft = inputs
     for number, item in enumerate(list(draft["work_items"]), 1):
         gate = deepcopy(item)
         gate.update(id=f"I{number}", kind="investigation", description=f"Investigate outcome {number}")
         gate.pop("resolution")
+        gate.pop("planned_pr")
         draft["work_items"].append(gate)
-        item.update(branch="A", gated_by=gate["id"], depends_on=[gate["id"]])
+        item.update(planned_pr=f"PR-{number}", branch="A", gated_by=gate["id"], depends_on=[gate["id"]])
     plan = module("repository_plan").finalize_repository_plan(context, draft)
-    assert plan["ready_for_drafting"] is False
-    assert any(item["reason"] == "conditional_repository_collision" for item in plan["unresolved"])
+    assert plan["ready_for_drafting"] is True
+    implementations = [s for s in plan["scopes"] if s["kind"] == "implementation"]
+    assert len(implementations) == 2
+    assert {s["gated_by"] for s in implementations} == {"investigation/I1", "investigation/I2"}
 
 
 @pytest.mark.parametrize("resolution", [
@@ -108,6 +114,7 @@ def test_unresolved_destination_is_explicit_and_never_defaults(inputs, resolutio
 def test_grouping_cycle_is_reported_not_dropped(inputs):
     context, draft = inputs
     draft["work_items"][1]["resolution"]["target_key"] = "dashboard"
+    draft["work_items"][1]["planned_pr"] = "PR-dashboard"
     draft["work_items"][1]["depends_on"] = ["W1"]
     third = deepcopy(draft["work_items"][0])
     third.update(id="W3", depends_on=["W2"])
@@ -133,15 +140,20 @@ def test_explicit_repository_input_conflict_stays_unresolved(inputs):
     assert any(u["reason"] == "explicit_repository_conflict" for u in plan["unresolved"])
 
 
-def test_conditional_same_repo_work_retains_one_effective_scope(inputs):
+def test_conditional_pr_keeps_its_gate_beside_unconditional_work_in_the_same_repo(inputs):
     context, draft = inputs
     gate = deepcopy(draft["work_items"][0])
     gate.update(id="I1", kind="investigation", description="Confirm compatible log convention")
     gate.pop("resolution")
+    gate.pop("planned_pr")
     draft["work_items"].append(gate)
-    draft["work_items"][1].update(branch="A", gated_by="I1", depends_on=["I1"])
+    draft["work_items"][1].update(planned_pr="PR-cloudmanager", branch="A", gated_by="I1", depends_on=["I1"])
     plan = module("repository_plan").finalize_repository_plan(context, draft)
     implementations = [s for s in plan["scopes"] if s["kind"] == "implementation"]
-    assert len(implementations) == 1
-    assert implementations[0]["work_item_ids"] == ["W1", "W2"]
-    assert plan["work_items"][1]["branch"] == "A"
+    assert plan["ready_for_drafting"] is True
+    assert len(implementations) == 2
+    conditional = next(s for s in implementations if s["planned_pr"] == "PR-cloudmanager")
+    assert conditional["work_item_ids"] == ["W2"]
+    assert conditional["branch"] == "A"
+    assert conditional["gated_by"] == "investigation/I1"
+    assert conditional["dependencies"] == ["investigation/I1"]

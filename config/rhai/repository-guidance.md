@@ -9,10 +9,12 @@ Use release-appropriate Architecture Context documents to understand responsibil
 APIs and dependencies. Read applicable active overlays before generated component
 documents; disregard superseded or release-inapplicable overlays.
 
-Preserve every strategy requirement and acceptance condition. Manager and
-cloudmanager work in one approved operator repository belongs to one epic.
-Dashboard source changes belong to the approved Dashboard repository's epic.
-Required documentation follows its approved publication repository.
+Preserve every strategy requirement and acceptance condition. Plan one Epic per
+planned PR, with exactly one approved contribution repository per PR. One
+repository may have several Epics for distinct, reviewable PRs, including manager
+and cloudmanager changes when they warrant separate PRs. Keep incidental docs
+and tests with their PR. Required documentation follows its approved publication
+repository. Preserve dependencies within a repository and across repositories.
 
 Repository names explicitly supplied by the strategy must be validated against
 the inventory and evidence. Missing contribution rules, conflicting evidence and

@@ -12,12 +12,14 @@ Epic files: artifacts/epic-tasks/{ID}-E*.md
 
 ## Preserve repository boundaries (when REPOSITORY_PLAN is supplied)
 
-Read the bound plan/context before applying review findings. Its repository scopes
+Read the bound plan/context before applying review findings. Its planned PR scopes
 and work assignments take precedence over the domain policy's component/team,
-subsystem, priority, work-product and triage split/merge instructions. Never split
-same-repo manager/cloudmanager or same-repo docs into sibling implementations;
-never merge scopes for different repositories. Put size/priority distinctions into
-work sections or later stories. Preserve components, owners, required AC facets,
+subsystem, priority, work-product and triage split/merge instructions. Keep exactly
+one Epic per planned PR, each targeting one repository. Never merge distinct
+planned PR scopes, even in the same repository, or split one planned PR into
+multiple Epics. Preserve real dependencies between those Epics. If PR boundaries
+need to change, report the need for replanning rather than changing the bound
+plan. Preserve components, owners, required AC facets,
 conditional scope and genuine dependencies. A target field must agree with actual
 scope/AC text. A plan-level target/evidence defect needs replanning and fresh
 review; report it rather than editing the bound plan or substituting a default.

@@ -2,7 +2,7 @@
 schema_version: 1
 enabled: false
 repository_policy:
-  mode: one-implementation-epic-per-repository
+  mode: one-implementation-epic-per-planned-pr
   inventory:
     source_id: contribution-policy
     path: config/rhai/repository-inventory.yaml

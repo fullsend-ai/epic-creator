@@ -192,6 +192,7 @@ def test_conditional_repository_plan_is_attached_to_its_investigation(publicatio
     draft = proposal(context)
     draft["work_items"][0]["kind"] = "investigation"
     draft["work_items"][0].pop("resolution")
+    draft["work_items"][0].pop("planned_pr")
     draft["work_items"][1].update(branch="A", gated_by="W1", depends_on=["W1"])
     plan = repository_plan.finalize_repository_plan(context, draft)
     repository_plan.atomic_json(repository_plan.paths("artifacts", source.stem)["plan"], plan)

@@ -11,7 +11,7 @@ Architecture context: .context/architecture-context/
 ## Repository-oriented creation (when REPOSITORY_PLAN is supplied)
 
 Read the completed repository plan before drafting any epic. It is the binding
-boundary contract: create exactly one epic per scope, covering every assigned
+boundary contract: create exactly one Epic per planned PR scope, covering every assigned
 work item and its repo-local acceptance conditions. Do not first create component
 or subsystem epics and attach targets afterward. Never change the bound inventory,
 plan, source snapshots or validation code. An unresolved plan blocks drafting.
@@ -22,11 +22,12 @@ review worker evaluates the drafts independently in the following phase.
 The repository plan takes precedence over the legacy team,
 component, subsystem, priority, work-product, size and single-epic triage splits.
 Keep differences as work sections, ownership notes, priorities and internal order
-inside the repository epic. Genuine Investigation scopes remain separate.
-Manager/cloudmanager in one operator repo must become one implementation epic.
-Required docs in the same repository belong there too; retain documentation
-accuracy validation and tests even for mixed code/docs scopes. A separate docs
-repository gets its own scope. Preserve strategy-wide integration checks in the
+inside the planned PR Epic. Genuine Investigation scopes remain separate.
+Several planned PRs may target the same repository: each must become a separate
+Implementation Epic, with its own scope, acceptance criteria and real dependencies.
+Do not merge them by repository or split one planned PR into multiple Epics.
+Keep required docs and tests for a PR in its Epic, retaining accuracy validation.
+Preserve strategy-wide integration checks in the
 summary, while each epic's modification scope fits its single target repository.
 
 For each scope copy its exact `scope_id` as `repository_scope`, and copy its exact
@@ -36,15 +37,15 @@ Set `mapping_snapshot_digest`, scope
 priority and the exact `target_repository` object for Implementation. Keep the
 scope's homogeneous `implementation_type`; omit it for mixed/general scopes.
 Set summary `mapping_snapshot_digest` too. Map scope dependencies to generated
-epic IDs; preserve branch/gate semantics. Same-target conditional work already
-folded into a shared scope keeps its conditions inside that epic's ACs.
+epic IDs, including dependencies between PRs in the same repository; preserve
+branch/gate semantics. Do not fold conditional PRs into unconditional Epics.
 
 Read the displayed epic schema and set these fields using `frontmatter.py set
 --source`, as with existing metadata. Example additional arguments (substitute
 actual bound values):
 
 ```
-repository_scope=repo/operator 'work_item_ids=["W1","W2"]' \
+repository_scope=pr/PR-001 'work_item_ids=["W1","W2"]' \
 'components=["Operator","Cloudmanager"]' mapping_snapshot_digest=<context-digest> \
  'target_repository={"inventory_key":"operator","provider":"github","host":"github.com","namespace":"example","repository":"operator"}'
 ```

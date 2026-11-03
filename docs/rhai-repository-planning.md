@@ -56,12 +56,25 @@ FETCH → PLAN_REPOSITORIES → DECOMPOSE → REVIEW_DECOMP → revision/review 
 ```
 
 The planner extracts requirements and acceptance conditions, resolves each work
-item against the configured evidence, then finalizes repository scopes. Drafting
-creates one Implementation epic per repository in each effective scenario.
-Manager and cloudmanager changes in one operator repository stay in one epic,
-including their components, owners, tests and documentation. Dashboard changes
-in another repository get a separate epic and retain real dependencies. Genuine
+item against the configured evidence, and assigns implementation work to explicit
+planned PRs. Drafting creates **one Implementation Epic per planned PR**, with
+exactly one target repository per Epic. Several planned PRs can target the same
+repository; their Epics stay separate and retain real dependencies. Work items,
+incidental documentation and tests that belong to one PR stay together. Genuine
 Investigation questions and conditional outcomes remain explicit.
+
+Every implementation work item requires a stable `planned_pr` ID, such as
+`PR-001`; items in the same proposed PR share that ID. The finalizer rejects a
+PR spanning multiple repositories or inconsistent conditional branches/gates.
+Each finalized Implementation scope has `scope_id: pr/PR-001` and `planned_pr:
+PR-001`; the Epic copies the scope ID as `repository_scope`. For example, two
+Feast PRs (API and operator provisioning) plus a platform-operator integration
+PR produce three Epics across two repositories, not two repository-wide Epics.
+
+Repository policy mode is `one-implementation-epic-per-planned-pr`. Older
+repository-only configurations/proposals must be regenerated with this policy
+and the required PR assignments. Previously reviewed plans are not migrated
+automatically; run planning, drafting and review again.
 
 When a strategy names repositories, those names constrain the work they refer to;
 the planner still checks them against the approved inventory and evidence.

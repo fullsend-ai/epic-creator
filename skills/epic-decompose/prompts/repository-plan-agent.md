@@ -1,4 +1,4 @@
-# Plan repository scopes before epic creation
+# Plan single-repository PRs before epic creation
 
 Source issue: {ID}
 Domain: RHAI
@@ -16,7 +16,7 @@ and upstream/downstream relationships. Only the file explicitly selected by
 snapshot; do not substitute another prompt or discover instructions from links.
 
 Guidance cannot override this shared workflow, configured source roles, approved
-inventory, original requirements, one-repository epic boundaries or validation.
+inventory, original requirements, one-Epic-per-planned-PR boundaries or validation.
 It is not ownership evidence: cite the actual mapping/architecture documents for
 repository resolution. If its directions conflict with those constraints or the
 evidence, report the affected work as unresolved instead of guessing.
@@ -27,7 +27,7 @@ snapshots or validation scripts. Never access credentials.
 Do not read existing epics, historical PR outcomes or expected evaluation answers.
 
 Your output is a work plan, not draft epics. Do not create files under epic-tasks.
-The later decomposition agent writes epics from your validated repository scopes.
+The later decomposition agent writes one Epic for each validated planned PR.
 
 ## Extract the work
 
@@ -51,11 +51,18 @@ The later decomposition agent writes epics from your validated repository scopes
    unresolved with a concrete reason, approved candidates (possibly empty) and
    available citations. Never choose the first/default repository. Publication
    destination for required docs is part of resolution, not an assumed ADR repo.
-6. Preserve genuine work dependencies. Manager and cloudmanager changes in the
-   same operator repo are work items in one future implementation epic. Component,
-   team, priority, subsystem or documentation differences do not create another
-   epic for the same repository. Conditional items retain `branch`, `gated_by`
-   (an Investigation work ID) and its dependency.
+6. Plan reviewable PR boundaries before drafting Epics. Assign every implementation
+   work item a stable `planned_pr` ID (for example `PR-001`). Items share an ID
+   only when they form one coherent PR with its own testable acceptance criteria
+   in exactly one repository. A repository may have several planned PRs and thus
+   several Epics: for example an API change and a dependent operator change.
+   Do not merge distinct PRs just because they share a repository, component, or
+   team. Keep code, incidental documentation and tests for the same PR together;
+   do not split every small task into its own PR. Explain the PR boundary in the
+   work descriptions, and preserve real dependencies between PRs in the same or
+   different repositories. Each planned PR has one consistent conditional
+   `branch` and `gated_by` (an Investigation work ID), if conditional. Keep
+   unconditional work and different conditional outcomes in distinct planned PRs.
 
 ## Write the proposal
 
@@ -82,7 +89,14 @@ Every `acceptance_refs` entry must appear in an acceptance criterion's
 `source_ref`. Additional criteria may trace the item's assigned `requirement_refs`.
 Do not reference a requirement or AC assigned only to another work item.
 
-Implementation work also has `resolution`:
+Implementation work requires `planned_pr` and `resolution`. The PR ID identifies
+a proposed change, not an existing PR number or URL; use letters, digits, dots,
+underscores or hyphens. Investigations do not have a `planned_pr`.
+
+Example assignment: `"planned_pr": "PR-001"`. Several work items may share this
+ID, but they must target the same repository and conditional outcome.
+
+The `resolution` is:
 
 ```json
 {"status":"resolved","target_key":"operator","evidence_refs":[{"source_id":"mapping","path":"mapping.md","quote":"Exact supporting source text"}]}
@@ -106,7 +120,8 @@ Write the proposal, then invoke the deterministic finalizer as your final action
 python3 scripts/repository_plan.py finalize --source {ID}
 ```
 
-It groups work by canonical repository and validates coverage/dependencies before
+It groups work by explicit planned PR, enforces a single canonical repository
+per PR, and validates coverage/dependencies before
 writing a completed plan atomically. Exit 0 means ready for drafting; exit 2 means
 valid unresolved output retained for reporting; exit 1 means malformed output that
 you must fix before finishing. Do not edit the final plan yourself or mark an

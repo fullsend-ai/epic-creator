@@ -24,7 +24,7 @@
       ],
       "properties": {
         "mode": {
-          "const": "one-implementation-epic-per-repository"
+          "const": "one-implementation-epic-per-planned-pr"
         },
         "inventory": {
           "type": "object",

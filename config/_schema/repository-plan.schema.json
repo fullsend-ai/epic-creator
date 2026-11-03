@@ -68,6 +68,13 @@
           "delivery_type",
           "depends_on"
         ],
+        "allOf": [
+          {
+            "if": {"properties": {"kind": {"const": "implementation"}}},
+            "then": {"required": ["planned_pr"]},
+            "else": {"not": {"required": ["planned_pr"]}}
+          }
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -78,6 +85,10 @@
               "implementation",
               "investigation"
             ]
+          },
+          "planned_pr": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
           },
           "description": {
             "type": "string",
