@@ -42,6 +42,11 @@ class LocalJira:
         path = parsed.path.removeprefix("/rest/api/3")
         body = json.loads(raw) if raw and "application/json" in headers.get("Content-Type", "") else None
         self.requests.append({"method": method, "path": parsed.path, "body": deepcopy(body)})
+        if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes":
+            return {"issueTypes": [{"id": "10000", "name": "Epic"}], "total": 1}
+        if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes/10000":
+            return {"fields": [{"fieldId": "customfield_99901", "name": "repo-url",
+                               "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:url"}}], "total": 1}
         if method == "GET" and path == "/myself":
             return {"accountId": "synthetic-account", "active": True}
         if method == "GET" and path.startswith("/attachment/"):
