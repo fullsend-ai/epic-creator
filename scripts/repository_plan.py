@@ -199,7 +199,9 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                 scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
                 scope["target_label"] = entry["label"]
             if first.get("branch"):
-                scope.update(branch=first["branch"], gated_by=item_scope[first["gated_by"]])
+                scope["branch"] = first["branch"]
+            if first.get("gated_by"):
+                scope["gated_by"] = item_scope[first["gated_by"]]
         scopes.append(scope)
     for scenario in _scenarios(scopes):
         ids = {scope["scope_id"] for scope in scenario}
