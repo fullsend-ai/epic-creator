@@ -53,3 +53,19 @@ def test_incomplete_or_unsafe_configuration_is_rejected(tmp_path, change):
 def test_disabled_policy_preserves_existing_rhai_behavior():
     selected = config_module().load_config()
     assert selected.repository_policy is None
+
+
+def test_disabled_policy_does_not_validate_repository_inputs(tmp_path):
+    api = config_module()
+    path = tmp_path / "disabled.yaml"
+    path.write_text(yaml.safe_dump({
+        "schema_version": 1,
+        "enabled": False,
+        # This is intentionally not a repository-mode policy.  Legacy runs
+        # must not depend on the new inventory/source schema while disabled.
+        "repository_policy": {},
+    }))
+
+    selected = api.load_config(path)
+
+    assert selected.repository_policy is None

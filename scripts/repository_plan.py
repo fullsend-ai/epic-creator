@@ -79,7 +79,8 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                    "mapping_snapshot_digest": context["digest"], "proposal": proposal,
                    "requirements": [], "work_items": [], "scopes": [],
                    "unresolved": [{"work_item_id": None, "reason": context.get("reason", "source_unavailable"),
-                                   "candidates": []}], "complete": True, "ready_for_drafting": False}
+                                   "candidates": [], "retryable": context.get("retryable", False)}],
+                   "complete": True, "ready_for_drafting": False}
         return {**payload, "digest": digest(payload)}
     validate_context_snapshot(context)
     schema = json.loads((SCHEMA_DIR / "repository-plan.schema.json").read_text())

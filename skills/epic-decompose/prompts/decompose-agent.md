@@ -10,6 +10,13 @@ Architecture context: .context/architecture-context/
 
 ## Repository-oriented creation (when REPOSITORY_PLAN is supplied)
 
+This section is inactive unless the dispatcher explicitly supplies a
+`REPOSITORY_PLAN` variable and the referenced plan validates successfully. In
+the legacy/disabled path, ignore repository mapping fields and rules entirely:
+do not create repository-scoped metadata, repository labels, target warnings,
+or a repository planning stage. Continue with the existing FETCH → DECOMPOSE
+behavior.
+
 Read the completed repository plan before drafting any epic. It is the binding
 boundary contract: create exactly one Epic per planned PR scope, covering every assigned
 work item and its repo-local acceptance conditions. Do not first create component

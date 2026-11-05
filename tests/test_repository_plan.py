@@ -30,6 +30,17 @@ def test_manager_cloudmanager_grouped_before_epic_files_exist(inputs, tmp_path):
     assert not (tmp_path / "artifacts/epic-tasks").exists()
 
 
+def test_source_outage_remains_retryable_and_blocks_drafting(inputs):
+    context, draft = inputs
+    context = {**context, "status": "blocked", "reason": "source_unavailable", "retryable": True}
+
+    plan = module("repository_plan").finalize_repository_plan(context, draft)
+
+    assert plan["ready_for_drafting"] is False
+    assert plan["unresolved"] == [{"work_item_id": None, "reason": "source_unavailable",
+                                   "candidates": [], "retryable": True}]
+
+
 def test_cross_repo_work_keeps_real_dependency(inputs):
     context, draft = inputs
     draft["work_items"][1]["resolution"]["target_key"] = "dashboard"

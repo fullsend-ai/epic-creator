@@ -49,13 +49,21 @@ The later decomposition agent writes one Epic for each validated planned PR.
    relationships and source roles. Inventory membership alone is insufficient.
 5. If evidence conflicts, is unavailable, or cannot establish one target, write
    unresolved with a concrete reason, approved candidates (possibly empty) and
-   available citations. Never choose the first/default repository. Publication
-   destination for required docs is part of resolution, not an assumed ADR repo.
+   available citations. Distinguish retryable source-unavailable/fetch failures
+   from a durable ownership or approval conflict; a retryable failure must stay
+   blocked until the same pinned inputs can be fetched and reviewed. Never
+   choose the first/default repository. Publication destination for required
+   docs is part of resolution, not an assumed ADR repo. When authoritative
+   citations disagree, preserve the contradiction rather than selecting one
+   source silently.
 6. Plan reviewable PR boundaries before drafting Epics. Assign every implementation
    work item a stable `planned_pr` ID (for example `PR-001`). Items share an ID
    only when they form one coherent PR with its own testable acceptance criteria
-   in exactly one repository. A repository may have several planned PRs and thus
-   several Epics: for example an API change and a dependent operator change.
+   in exactly one repository. Check that the members share a reviewable change
+   boundary; do not use one PR to bundle unrelated components, teams, delivery
+   types, or independent work streams merely because they resolve to the same
+   repository. A repository may have several planned PRs and thus several
+   Epics: for example an API change and a dependent operator change.
    Do not merge distinct PRs just because they share a repository, component, or
    team. Keep code, incidental documentation and tests for the same PR together;
    do not split every small task into its own PR. Explain the PR boundary in the
