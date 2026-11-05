@@ -23,8 +23,6 @@ class Jira:
 
     def __init__(self):
         self.issues = {}
-        self.repo_fields = [{"fieldId": "customfield_99901", "name": "repo-url",
-                             "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:url"}}]
         self.links = set()
         self.writes = []
         self.attempts = []
@@ -50,10 +48,6 @@ class Jira:
         return Response(json.dumps(result).encode())
 
     def handle(self, method, path, request):
-        if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes":
-            return {"issueTypes": [{"id": "10000", "name": "Epic"}], "total": 1}
-        if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes/10000":
-            return {"fields": deepcopy(self.repo_fields), "total": len(self.repo_fields)}
         if path.endswith("/comment"):
             fields = self.issues[path.split("/")[2]]["fields"]
             comments = fields.setdefault("comment", [])

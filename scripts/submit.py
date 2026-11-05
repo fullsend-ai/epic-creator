@@ -255,10 +255,12 @@ def _build_plan(epics, valid_components, repository_inventory=None):
     if repository_inventory is not None:
         for entry, (_, data, _) in zip(plan, epics):
             target = data.get("target_repository")
+            label = repository_inventory[target["inventory_key"]]["label"] if target else None
             entry["repository_warning"] = data.get("repository_warning")
-            entry["repo_url"] = (f"https://{target['host']}/{target['namespace']}/{target['repository']}"
-                                 if target else None)
+            entry["repository_label"] = label
             entry["components"] = list(data["components"])
+            if label:
+                entry["labels"].append(label)
     return plan
 
 
@@ -278,8 +280,8 @@ def _print_plan(plan, strat_id, dry_run):
         if entry["dependencies"]:
             print(f"  {'':>30} blocked by: "
                   f"{', '.join(entry['dependencies'])}")
-        if "repo_url" in entry:
-            repository = entry['repo_url'] or (
+        if "repository_label" in entry:
+            repository = entry['repository_label'] or (
                 'Unresolved — fix before starting work' if entry.get('repository_warning') else 'Investigation')
             print(f"  Repository: {repository}; "
                   f"components: {', '.join(entry['components'])}")
@@ -353,8 +355,6 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None, create=
                 parent_key=strat_id,
                 assignee_id=assignee_id,
             )
-            if "custom_fields" in entry:
-                fields["custom_fields"] = entry["custom_fields"]
             jira_key = (create(entry, **fields) if create else
                         create_issue(server, user, token, **fields))
         except Exception as e:
@@ -411,7 +411,7 @@ def _create_dependency_links(server, user, token, plan, id_to_jira_key):
                       f"dependency not created", file=sys.stderr)
                 continue
             try:
-                if "repo_url" in entry:
+                if "repository_label" in entry:
                     issue = get_issue(server, user, token, blocker_key, fields=["issuelinks"])
                     if any(link.get("type", {}).get("name") == DEPENDENCY_LINK_TYPE
                            and link.get("outwardIssue", {}).get("key") == blocked_key
@@ -585,7 +585,7 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key):
                 allow_unicode=True)
             action = _replace_attachment(
                 server, user, token, jira_key, filename,
-                yaml_content, existing, immutable="repo_url" in entry)
+                yaml_content, existing, immutable="repository_label" in entry)
             if "repository_evidence" in entry:
                 _replace_attachment(server, user, token, jira_key,
                     f"{jira_key}-repository-evidence.json",
@@ -696,7 +696,7 @@ def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assign
     all_created = len(id_to_jira_key) == len(plan)
     if all_created and not errors and source_complete:
         print("  Phase 5: Labeling source strategy...")
-        repository_bound = any("repo_url" in entry for entry in plan)
+        repository_bound = any("repository_label" in entry for entry in plan)
         already_labeled = (repository_bound and STRAT_LABEL in
                            get_issue(server, user, token, strat_id, fields=["labels"])["fields"].get("labels", []))
         if not already_labeled and not _label_strategy(server, user, token, strat_id):

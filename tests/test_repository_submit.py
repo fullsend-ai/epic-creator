@@ -63,17 +63,13 @@ def run(monkeypatch, source, *, explicit=True):
 
 def test_shared_epic_creator_preserves_repository_scope(publication):
     selected, source, _, _, jira = publication
-    submission = repository_submit.preflight(selected, source.stem, Path("artifacts"))
-    with repository_submit.publication(submission, Path("artifacts"),
-                                       ("https://jira.example.test", "synthetic", "synthetic")) as (create, _):
-        keys, errors = submit._create_epics("https://jira.example.test", "synthetic", "synthetic",
-                                           submission["plan"], source.stem, create=create)
+    plan = repository_submit.preflight(selected, source.stem, Path("artifacts"))["plan"]
+    keys, errors = submit._create_epics("https://jira.example.test", "synthetic", "synthetic", plan, source.stem)
     assert errors == 0
     fields = jira.issues[keys[f"{source.stem}-E001"]]["fields"]
     assert fields["components"] == [{"name": "Operator"}, {"name": "Cloudmanager"}]
     assert "https://github.com/example/operator" in json.dumps(fields["description"])
-    assert fields["customfield_99901"] == "https://github.com/example/operator"
-    assert not any(label.startswith("target-repo-") for label in fields["labels"])
+    assert "target-repo-operator" in fields["labels"]
 
 
 def test_empty_repository_batch_is_successful(publication, monkeypatch):
@@ -91,8 +87,7 @@ def test_initial_create_contains_matching_target_and_all_components(publication,
     _, source, context, _, jira = publication
     assert run(monkeypatch, source) == 0
     fields = jira.issues["RHAI-1"]["fields"]
-    assert fields["customfield_99901"] == "https://github.com/example/operator"
-    assert not any(label.startswith("target-repo-") for label in fields["labels"])
+    assert [label for label in fields["labels"] if label.startswith("target-repo-")] == ["target-repo-operator"]
     assert fields["components"] == [{"name": "Operator"}, {"name": "Cloudmanager"}]
     assert "epic-creator-auto-created" in fields["labels"]
     assert "https://github.com/example/operator" in json.dumps(fields["description"])
@@ -138,13 +133,12 @@ def test_invalid_repository_submission_has_zero_writes(publication, monkeypatch,
     assert jira.writes == []
 
 
-@pytest.mark.parametrize("url", [None, "", "https://github.com/example/dashboard"])
-def test_recovery_rejects_changed_repository_url_without_mutation(publication, monkeypatch, url):
+@pytest.mark.parametrize("labels", [[], ["target-repo-dashboard"], ["target-repo-operator", "target-repo-dashboard"]])
+def test_recovery_rejects_changed_repository_without_relabel_or_create(publication, monkeypatch, labels):
     _, source, _, _, jira = publication
     assert run(monkeypatch, source) == 0
     fields = jira.issues["RHAI-1"]["fields"]
-    fields["customfield_99901"] = url
-    fields["labels"].append("keep-me")
+    fields["labels"] = [v for v in fields["labels"] if not v.startswith("target-repo-")] + labels + ["keep-me"]
     before = deepcopy(jira.issues), list(jira.writes)
     assert run(monkeypatch, source) == 1
     assert (jira.issues, jira.writes) == before
@@ -213,7 +207,6 @@ def test_conditional_repository_plan_is_attached_to_its_investigation(publicatio
     fields = jira.issues["RHAI-1"]["fields"]
     assert "epic-creator-investigation" in fields["labels"]
     assert not any(label.startswith("target-repo-") for label in fields["labels"])
-    assert fields.get("customfield_99901") is None
     assert any("branch-a-plan-" in attachment["filename"] for attachment in fields["attachment"])
     before = list(jira.writes)
     assert run(monkeypatch, source) == 0
@@ -292,7 +285,6 @@ def test_unresolved_epic_is_created_with_warning_and_evidence(unresolved_publica
     assert warning in json.dumps(fields["description"])
     assert fields["comment"] == [{"id": "1", "body": submit.markdown_to_adf(warning)}]
     assert not any(label.startswith("target-repo-") for label in fields["labels"])
-    assert fields.get("customfield_99901") is None
     assert submit.STRAT_LABEL not in jira.issues[source.stem]["fields"]["labels"]
     before = deepcopy(jira.issues), list(jira.writes)
     assert run(monkeypatch, source) == 0
@@ -308,42 +300,3 @@ def test_unresolved_warning_recovers_without_duplicate_epic_or_comment(unresolve
     assert run(monkeypatch, source) == 0
     assert len(jira.issues["RHAI-1"]["fields"]["comment"]) == 1
     assert set(jira.issues) == {source.stem, "RHAI-1"}
-
-
-@pytest.mark.parametrize("problem", ["missing", "duplicate", "text", "noncustom"])
-def test_invalid_repo_url_field_prevents_all_jira_writes(publication, monkeypatch, problem):
-    _, source, _, _, jira = publication
-    if problem == "missing":
-        jira.repo_fields = []
-    elif problem == "duplicate":
-        jira.repo_fields.append({**jira.repo_fields[0], "fieldId": "customfield_99902"})
-    elif problem == "text":
-        jira.repo_fields[0]["schema"]["custom"] = "com.atlassian.jira.plugin.system.customfieldtypes:textfield"
-    else:
-        jira.repo_fields[0]["fieldId"] = "url"
-    assert run(monkeypatch, source) == 1
-    assert jira.writes == []
-
-
-def test_repository_url_field_uses_project_metadata_and_paginates(monkeypatch):
-    calls = []
-    def metadata(server, path, user, token):
-        calls.append(path)
-        if path.startswith("/issue/createmeta/RHAI/issuetypes?"):
-            return {"issueTypes": [{"id": "10000", "name": "Epic"}], "total": 1}
-        if "startAt=0" in path:
-            return {"fields": [{"fieldId": "summary", "name": "Summary"}], "total": 2}
-        return {"fields": [{"fieldId": "customfield_45678", "name": "repo-url",
-                            "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:url"}}], "total": 2}
-    monkeypatch.setattr(repository_submit.jira, "api_call_with_retry", metadata)
-    assert repository_submit._repository_url_field(("https://jira.example.test", "synthetic", "synthetic")) == "customfield_45678"
-    assert "startAt=1" in calls[-1]
-
-
-def test_unresolved_recovery_rejects_an_invented_repo_url(unresolved_publication, monkeypatch):
-    _, source, _, jira = unresolved_publication
-    assert run(monkeypatch, source) == 0
-    jira.issues["RHAI-1"]["fields"]["customfield_99901"] = "https://github.com/example/guessed"
-    before = deepcopy(jira.issues), list(jira.writes)
-    assert run(monkeypatch, source) == 1
-    assert (jira.issues, jira.writes) == before

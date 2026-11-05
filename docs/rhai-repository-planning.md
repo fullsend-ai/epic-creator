@@ -10,9 +10,8 @@ Edit [`config/rhai-repositories.yaml`](../config/rhai-repositories.yaml). The
 configuration is checked against its JSON schema when pipeline commands run.
 
 - `inventory` selects a YAML file listing approved contribution destinations,
-  their canonical identities and approval references. Historical
-  `target-repo-<inventory_key>` labels remain part of the inventory input format;
-  the publisher does not add these labels to Jira. Start with the schema in
+  their canonical identities, stable `target-repo-<inventory_key>` labels and
+  approval references. Start with the schema in
   [`config/_schema/repository-inventory.schema.json`](../config/_schema/repository-inventory.schema.json).
 - `sources` selects Git repositories and paths. Each has an explicit ref, owner
   and `authoritative` or `supporting` role. HTTPS repository, file and directory
@@ -126,21 +125,8 @@ continue to use Epic Creator's fixed RHAI conventions.
 
 Dry-run performs local validation without Jira writes. Publication also checks
 the current approved Jira source and content before writing. Each resolved initial create
-sets the canonical HTTPS repository URL in the custom URL field named `repo-url`
-and includes all components. The publisher resolves the field ID from the RHAI
-Epic create metadata, so no site-specific custom-field ID is hard-coded. Jira
-must have exactly one field with that name, of the URL type, available on the
-RHAI Epic create screen (and its edit/view screens for normal use). Missing, ambiguous or incorrectly typed fields block
-publication before any writes. This field setup is an administrator prerequisite;
-the publisher does not create or rename Jira fields.
-
-Unresolved Epics and Investigations leave `repo-url` empty. Unresolved Epics keep
-the existing warning in their description and comment. Repository labels are no
-longer added; unrelated classification and retry-identity labels remain. Recovery
-verifies `repo-url` against the reviewed target and stops on missing or changed
-values rather than silently rewriting a published epic. Existing publications
-with the old label contract require explicit reconciliation; the publisher does
-not migrate or relabel existing Jira issues. Published issues retain the
+includes its repository label and all components. Unresolved Epics omit the
+repository label and include the warning. Published issues retain the
 canonical target, source hashes, inventory revision, scope and work evidence.
 Conditional branch plans are attached to their Investigation gate. Publishing
 eligible Epics from a partial plan does not apply the source's fully decomposed
