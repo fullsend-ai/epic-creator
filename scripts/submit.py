@@ -256,6 +256,7 @@ def _build_plan(epics, valid_components, repository_inventory=None):
         for entry, (_, data, _) in zip(plan, epics):
             target = data.get("target_repository")
             label = repository_inventory[target["inventory_key"]]["label"] if target else None
+            entry["repository_warning"] = data.get("repository_warning")
             entry["repository_label"] = label
             entry["components"] = list(data["components"])
             if label:
@@ -280,7 +281,9 @@ def _print_plan(plan, strat_id, dry_run):
             print(f"  {'':>30} blocked by: "
                   f"{', '.join(entry['dependencies'])}")
         if "repository_label" in entry:
-            print(f"  Repository: {entry['repository_label'] or 'Investigation'}; "
+            repository = entry['repository_label'] or (
+                'Unresolved — fix before starting work' if entry.get('repository_warning') else 'Investigation')
+            print(f"  Repository: {repository}; "
                   f"components: {', '.join(entry['components'])}")
 
     if already:

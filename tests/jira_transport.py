@@ -48,6 +48,14 @@ class Jira:
         return Response(json.dumps(result).encode())
 
     def handle(self, method, path, request):
+        if path.endswith("/comment"):
+            fields = self.issues[path.split("/")[2]]["fields"]
+            comments = fields.setdefault("comment", [])
+            if method == "POST":
+                comment = {"id": str(len(comments) + 1), **json.loads(request.data)}
+                comments.append(comment)
+                return comment
+            return {"comments": deepcopy(comments), "total": len(comments)}
         if method == "GET" and path.startswith("/issue/"):
             return deepcopy(self.issues[path.split("/")[2]])
         if path == "/search/jql":

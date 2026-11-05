@@ -134,7 +134,7 @@ def epic_metadata(plan):
                 "work_item_ids": scope["work_item_ids"],
                 "mapping_snapshot_digest": plan["mapping_snapshot_digest"],
                 "dependencies": [identities[dep] for dep in scope["dependencies"]]}
-        for key in ("target_repository", "implementation_type", "branch"):
+        for key in ("target_repository", "repository_warning", "implementation_type", "branch"):
             if scope.get(key) is not None: data[key] = deepcopy(scope[key])
         if scope.get("gated_by"): data["gated_by"] = identities[scope["gated_by"]]
         result.append(data)

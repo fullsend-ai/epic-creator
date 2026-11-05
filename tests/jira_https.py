@@ -55,6 +55,14 @@ class LocalJira:
                        if (marker and marker[1] in i["fields"].get("labels", []))
                        or (not marker and i["fields"]["issuetype"]["name"] != "Epic")]
             return {"issues": deepcopy(matches), "isLast": True}
+        if path.endswith("/comment"):
+            fields = self.issues[path.split("/")[2]]["fields"]
+            comments = fields.setdefault("comment", [])
+            if method == "POST":
+                comment = {"id": str(len(comments) + 1), **body}
+                comments.append(comment)
+                return comment
+            return {"comments": deepcopy(comments), "total": len(comments)}
         if method == "GET" and path.startswith("/issue/"):
             return deepcopy(self.issues[path.split("/")[2]])
         if method == "POST" and path == "/issue":

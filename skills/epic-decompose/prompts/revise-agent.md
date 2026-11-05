@@ -12,14 +12,15 @@ Epic files: artifacts/epic-tasks/{ID}-E*.md
 
 ## Preserve repository boundaries (when REPOSITORY_PLAN is supplied)
 
-For partial plans, retain unresolved work and blocked dependents as pending in
-the summary. Create/revise Epics only for finalized `scopes`. Do not satisfy a
-coverage comment by inventing an Epic for excluded work or guessing its target.
+For partial plans, retain every finalized scope, including unresolved PR Epics.
+Preserve their exact `repository_warning`, omit their target repository and keep
+all dependencies. Report pending repository resolution in the summary; never
+guess a target or remove unresolved work to satisfy review.
 
 Read the bound plan/context before applying review findings. Its planned PR scopes
 and work assignments take precedence over the domain policy's component/team,
 subsystem, priority, work-product and triage split/merge instructions. Keep exactly
-one Epic per planned PR, each targeting one repository. Never merge distinct
+one Epic per planned PR, with its resolved target or unresolved warning. Never merge distinct
 planned PR scopes, even in the same repository, or split one planned PR into
 multiple Epics. Preserve real dependencies between those Epics. If PR boundaries
 need to change, report the need for replanning rather than changing the bound

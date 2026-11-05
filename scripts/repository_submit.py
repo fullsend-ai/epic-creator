@@ -67,10 +67,13 @@ def preflight(selected, key, root):
         description = _build_description(entry["body"])
         data = by_id[entry["epic_id"]]
         scope = next(scope for scope in repository_plan["scopes"] if scope["scope_id"] == data["repository_scope"])
+        entry["repository_warning"] = scope.get("repository_warning")
         target = data.get("target_repository")
         if target:
             url = f"https://{target['host']}/{target['namespace']}/{target['repository']}"
             description += f"\n\n## Target repository\n\n{url}\n\nInventory key: {target['inventory_key']}\n"
+        if entry["repository_warning"]:
+            description += f"\n\n## Target repository warning\n\n{entry['repository_warning']}\n"
         description += f"\nMapping snapshot: {repository_context['digest']}\n"
         entry["repository_evidence"] = {
             "mapping_snapshot_digest": repository_context["digest"],
@@ -244,8 +247,20 @@ def publication(submission, root, credentials):
             raise RepositoryError(f"{key}: journal contains epics absent from reviewed plan")
         resolved = {entry["epic_id"]: _resolve(entry, journal["epics"].get(entry["epic_id"]), key, credentials)
                     for entry in plan}
+
+        def warn(entry, jira_key):
+            warning = entry.get("repository_warning")
+            if not warning:
+                return
+            body = jira.text_to_adf_paragraph(warning)
+            if not any(comment.get("body") == body for comment in jira.get_comments(*credentials, jira_key)):
+                jira.api_call(credentials[0], f"/issue/{jira_key}/comment", credentials[1], credentials[2],
+                              body={"body": body}, method="POST")
+
         for entry in plan:
             recovered = resolved[entry["epic_id"]]
+            if recovered:
+                warn(entry, recovered)
             if recovered and recovered != entry["jira_key"]:
                 artifacts.update_frontmatter(entry["path"], {"jira_key": recovered}, "epic-task")
                 entry["jira_key"] = recovered
@@ -268,6 +283,7 @@ def publication(submission, root, credentials):
             issue = jira.get_issue(*credentials, record["jira_key"],
                 fields=["project", "issuetype", "labels", "parent", "summary", "description", "components"])
             _verify_issue(entry, issue, key)
+            warn(entry, record["jira_key"])
             return record["jira_key"]
 
         yield create, (source["fields"].get("assignee") or {}).get("accountId")

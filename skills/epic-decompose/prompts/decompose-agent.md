@@ -15,12 +15,12 @@ boundary contract: create exactly one Epic per planned PR scope, covering every 
 work item and its repo-local acceptance conditions. Do not first create component
 or subsystem epics and attach targets afterward. Never change the bound inventory,
 plan, source snapshots or validation code. Draft only the finalized `scopes`.
-A partial plan may contain `unresolved` work: it blocks only the affected PRs
-and their dependents, which the finalizer excludes from `scopes`. Create no
-Epics for excluded work and never guess its target. List each blocked work ID,
-planned PR, reason and dependent work in the summary, keeping that source work
-explicitly pending. Do not claim the whole strategy is covered. A plan with
-`ready_for_drafting: false` still blocks drafting entirely.
+A partial plan retains unresolved PR scopes for creation. Draft their Epics with
+no target repository and copy the scope's exact `repository_warning` into
+frontmatter and prose. Never guess a target. Preserve all scope dependencies,
+including dependents of unresolved work. List unresolved work IDs, planned PRs,
+reasons and candidates in the summary; repository resolution remains pending.
+A plan with `ready_for_drafting: false` still blocks drafting entirely.
 Write only epic artifacts, signal rationale sidecars and the decomposition
 summary during this phase. Do not write or pre-complete review artifacts; the
 review worker evaluates the drafts independently in the following phase.
@@ -40,7 +40,8 @@ For each scope copy its exact `scope_id` as `repository_scope`, and copy its exa
 `work_item_ids` and ordered `components` list. Set `component` to that list's first
 member. Do not infer extra components from module names or the example below.
 Set `mapping_snapshot_digest`, scope
-priority and the exact `target_repository` object for Implementation. Keep the
+priority and the exact `target_repository` object when present. For unresolved
+Implementation scopes copy `repository_warning` and omit `target_repository`. Keep the
 scope's homogeneous `implementation_type`; omit it for mixed/general scopes.
 Set summary `mapping_snapshot_digest` too. Map scope dependencies to generated
 epic IDs, including dependencies between PRs in the same repository; preserve

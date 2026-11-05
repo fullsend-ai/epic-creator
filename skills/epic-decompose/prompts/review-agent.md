@@ -12,21 +12,23 @@ Output: artifacts/epic-reviews/{ID}-decomp-review.md
 
 ## Repository scope review (when REPOSITORY_PLAN is supplied)
 
-For a partial plan, review exactly the eligible `scopes`. Work in `unresolved`
-and its blocked dependents must be reported as pending in the summary, without
-Epic files. That explicit pending work is not a missing-coverage defect in the
-available Epics. Fail missing eligible scope/work/ACs, fabricated targets, extra
-Epics for blocked work, or claims that the entire strategy is complete. A passing
-review covers the eligible Epics only; remaining blockers stay unresolved.
+For a partial plan, review every finalized `scope`, including unresolved PRs.
+Unresolved Epics must preserve the scope's exact `repository_warning`, omit a
+target repository, retain dependencies and cover all assigned work/ACs. Fail
+fabricated targets, omitted scopes or missing warnings. Confirm the summary
+reports unresolved reasons and candidates; resolution remains pending even
+though the Epics can be created. Do not claim repository resolution is complete.
 
 Read the bound plan/context and the original strategy before scoring. Verify
 exactly one Implementation Epic per planned PR scope in every effective scenario,
-correct canonical target and all assigned work IDs. Read the actual epic prose:
+correct canonical target or exact unresolved warning and all assigned work IDs. Read the actual epic prose:
 a correct repository field does not excuse ACs requiring code changes in another
 repository. Cross-repo API references/tests are valid; cross-repo modifications
 belong to a separate planned PR Epic in their target repository. Compare all work and AC facets to original
-source intent, not merely ID lists. Check authoritative citations establish target
-correctness, not just inventory membership. Wrong approved repository fails.
+source intent, not merely ID lists. For resolved targets, check authoritative
+citations establish target correctness, not just inventory membership. Wrong
+approved repository fails. Explicit unresolved warnings are allowed; assess the
+recorded reasons and available evidence without requiring an invented target.
 
 If the bound context contains `guidance`, read `guidance.content` for the RHAI document interpretation instructions and assess whether the planner
 used them correctly. Only `policy.guidance` designates such instructions. They
@@ -44,10 +46,13 @@ incidental docs and tests belonging to one PR stay together. Keep
 all ownership, priority, docs accuracy ACs and integration verification. Branches
 must remain mutually exclusive; genuine investigation gates/dependencies survive.
 
-Missing/wrong target, mixed-repository modification scope, duplicate repository
+Missing a required resolved target or unresolved warning, a wrong target,
+mixed-repository modification scope, duplicate repository
 PR scope, merged planned PRs or snapshot mismatch is a major/critical Epic Boundaries defect and scores
 that criterion zero. Missing work/ACs scores the existing Coverage/Completeness
-criterion zero. Defective evidence or source interpretation is a blocking defect.
+criterion zero. Fabricated evidence or invalid source interpretation is a
+blocking defect; an explicitly unresolved destination with its required warning
+is allowed.
 Never accept a plan solely because deterministic reference checks passed.
 
 Write the body first, then finish via `frontmatter.py set --source` as below. For

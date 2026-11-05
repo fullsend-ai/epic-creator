@@ -78,16 +78,15 @@ automatically; run planning, drafting and review again.
 
 When a strategy names repositories, those names constrain the work they refer to;
 the planner still checks them against the approved inventory and evidence.
-Missing, conflicting or ambiguous destinations remain unresolved. They block the
-entire planned PR and its transitive dependents, while independent PRs and
-Investigations proceed. All work in a blocked PR stays pending together; no
-partial Epic is created for that PR. The full plan retains every source work
-item and blocking reason. A partial plan sets `ready_for_drafting: true` and
-`partial: true` and exposes only eligible `scopes` to drafting, review and
-submission. Reports show `partial`, retain the blockers and do not claim complete
-strategy coverage. With no eligible scopes, planning remains blocked entirely.
-Invalid source bindings, evidence or globally conflicting plans still fail
-closed.
+Missing, conflicting or ambiguous destinations remain unresolved. Their planned
+PR scopes remain available for drafting and creation with no guessed repository.
+Each affected Epic carries the warning: "The target repository is missing or
+unresolved. Confirm and update the target repository before starting work on
+this epic." Submission includes this warning in its description and adds a Jira
+comment, checking existing comments on retries. Dependencies and all assigned
+work stay intact. Plans with pending resolution set `partial: true`; the source
+is not marked fully decomposed. Invalid source bindings, evidence or global plan
+conflicts still block creation.
 
 For troubleshooting a single fetched strategy:
 
@@ -125,8 +124,9 @@ contains sources and planning policy. Jira projects, issue types and link types
 continue to use Epic Creator's fixed RHAI conventions.
 
 Dry-run performs local validation without Jira writes. Publication also checks
-the current approved Jira source and content before writing. Each initial create
-includes its repository label and all components. Published issues retain the
+the current approved Jira source and content before writing. Each resolved initial create
+includes its repository label and all components. Unresolved Epics omit the
+repository label and include the warning. Published issues retain the
 canonical target, source hashes, inventory revision, scope and work evidence.
 Conditional branch plans are attached to their Investigation gate. Publishing
 eligible Epics from a partial plan does not apply the source's fully decomposed

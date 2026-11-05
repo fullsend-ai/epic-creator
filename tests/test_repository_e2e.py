@@ -257,28 +257,29 @@ def test_three_planned_prs_create_three_epics_in_two_repositories(tmp_path, loca
     assert local_jira.writes == before
 
 
-def test_unresolved_work_is_reported_without_drafting(tmp_path, local_jira, certificate):
+def test_unresolved_work_is_created_with_warning(tmp_path, local_jira, certificate):
     w = Workspace(tmp_path / "run", local_jira, certificate)
-    def blocked_worker(phase, agent):
-        if phase == "FETCH":
-            prepared_worker(w, phase, agent)
-            return
-        assert phase == "PLAN_REPOSITORIES", "Unresolved work must not reach drafting"
-        directory = w.path / "artifacts/repository-plans"
-        context = json.loads((directory / f"{w.key}-context.json").read_text())
-        draft = proposal(context)
-        draft["work_items"][0]["resolution"] = {"status": "unresolved", "reason": "contribution_owner_unknown", "candidates": []}
-        (directory / f"{w.key}-proposal.json").write_text(json.dumps(draft))
-        w.cli("repository_plan", "finalize", "--source", w.key, expected=2)
-    phases = w.pipeline(worker=blocked_worker, expected_status="invalid")
-    assert "DECOMPOSE" not in phases
-    assert not (w.path / "artifacts/epic-tasks").exists()
-    report = yaml.safe_load(next((w.path / "artifacts/decompose-runs").glob("*.yaml")).read_text())
-    assert report["results"][0]["repository_planning"]["unresolved"][0]["reason"] == "contribution_owner_unknown"
-    assert not local_jira.writes
+    def worker(phase, agent):
+        prepared_worker(w, phase, agent)
+        if phase == "PLAN_REPOSITORIES":
+            directory = w.path / "artifacts/repository-plans"
+            draft_path = directory / f"{w.key}-proposal.json"
+            draft = json.loads(draft_path.read_text())
+            for item in draft["work_items"]:
+                item["resolution"] = {"status": "unresolved", "reason": "contribution_owner_unknown", "candidates": []}
+            draft_path.write_text(json.dumps(draft))
+            w.cli("repository_plan", "finalize", "--source", w.key)
+    assert "DECOMPOSE" in w.pipeline(worker=worker, expected_status="partial")
+    w.submit()
+    fields = local_jira.issues["RHAI-1"]["fields"]
+    assert not any(label.startswith("target-repo-") for label in fields["labels"])
+    assert "Confirm and update the target repository" in json.dumps(fields["comment"])
+    before = deepcopy(local_jira.writes)
+    w.submit()
+    assert local_jira.writes == before
 
 
-def test_partial_plan_creates_seven_epics_and_keeps_source_incomplete(tmp_path, local_jira, certificate):
+def test_partial_plan_creates_eight_epics_and_keeps_source_incomplete(tmp_path, local_jira, certificate):
     from test_repository_partial import separate_prs
     from submit import STRAT_LABEL
 
@@ -297,7 +298,7 @@ def test_partial_plan_creates_seven_epics_and_keeps_source_incomplete(tmp_path, 
     assert not local_jira.writes
     w.submit()
     created = {key: issue["fields"] for key, issue in local_jira.issues.items() if key != w.key}
-    assert len(created) == 7
+    assert len(created) == 8
     assert all(fields["issuetype"] == {"name": "Epic"} for fields in created.values())
     assert sum("target-repo-operator" in fields["labels"] for fields in created.values()) == 4
     assert sum("target-repo-dashboard" in fields["labels"] for fields in created.values()) == 3

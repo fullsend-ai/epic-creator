@@ -72,7 +72,8 @@ def test_guidance_alone_does_not_establish_repository_ownership(guidance, tmp_pa
     for item in draft["work_items"]:
         item["resolution"]["evidence_refs"][0]["path"] = "planning.md"
     plan = finalize_repository_plan(context, draft)
-    assert not plan["ready_for_drafting"]
+    assert plan["ready_for_drafting"]
+    assert all("target_repository" not in scope and scope["repository_warning"] for scope in plan["scopes"])
     assert {item["reason"] for item in plan["unresolved"]} == {"missing_authoritative_evidence"}
 
 

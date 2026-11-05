@@ -266,6 +266,7 @@ class ValidationError(Exception):
 
 SCHEMAS["epic-task"].update({
     "repository_scope": {"type": "string"},
+    "repository_warning": {"type": "string"},
     "work_item_ids": {"type": "list"},
     "components": {"type": "list"},
     "mapping_snapshot_digest": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
@@ -379,7 +380,7 @@ def validate(data, schema_type):
             required = list(_REPOSITORY_SOURCE_FIELDS)[:3]
             if schema_type == "epic-task":
                 required += ["repository_scope", "work_item_ids", "components", "mapping_snapshot_digest"]
-                if data.get("type") == "Implementation":
+                if data.get("type") == "Implementation" and not data.get("repository_warning"):
                     required.append("target_repository")
                 for name in ("components", "work_item_ids"):
                     values = data.get(name)

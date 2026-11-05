@@ -254,3 +254,49 @@ def test_html_report_shows_repository_target(publication):
     assert "Cloudmanager" in html
     html, _, _ = render_strategy_section(source.stem)
     assert "fixture-v1" in html
+
+
+@pytest.fixture
+def unresolved_publication(publication):
+    selected, source, context, _, jira = publication
+    draft = proposal(context)
+    draft["work_items"][1]["resolution"] = {
+        "status": "unresolved", "reason": "repository_unknown", "candidates": ["operator"]}
+    plan = repository_plan.finalize_repository_plan(context, draft)
+    repository_plan.atomic_json(repository_plan.paths("artifacts", source.stem)["plan"], plan)
+    metadata = write_repository_decomposition(source, plan)
+    write_artifact(Path(f"artifacts/epic-reviews/{source.stem}-decomp-review.md"),
+        {**metadata, "strat_id": source.stem, "score": 14, "pass": True, "recommendation": "accept",
+         "repository_plan_digest": plan["digest"],
+         "reviewed_decomposition_digest": repository_plan.decomposition_digest(plan, Path("artifacts"), source.stem)},
+        "decomp-review", body="Reviewed unresolved scope and warning\n")
+    return selected, source, plan, jira
+
+
+def test_unresolved_epic_is_created_with_warning_and_evidence(unresolved_publication, monkeypatch):
+    selected, source, plan, jira = unresolved_publication
+    submission = repository_submit.preflight(selected, source.stem, Path("artifacts"))
+    entry = submission["plan"][0]
+    assert entry["repository_evidence"]["inventory_entry"] is None
+    assert entry["repository_evidence"]["work_items"][1]["resolution"]["candidates"] == ["operator"]
+    assert run(monkeypatch, source) == 0
+    fields = jira.issues["RHAI-1"]["fields"]
+    warning = repository_plan.REPOSITORY_WARNING
+    assert warning in json.dumps(fields["description"])
+    assert fields["comment"] == [{"id": "1", "body": submit.markdown_to_adf(warning)}]
+    assert not any(label.startswith("target-repo-") for label in fields["labels"])
+    assert submit.STRAT_LABEL not in jira.issues[source.stem]["fields"]["labels"]
+    before = deepcopy(jira.issues), list(jira.writes)
+    assert run(monkeypatch, source) == 0
+    assert (jira.issues, jira.writes) == before
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_unresolved_warning_recovers_without_duplicate_epic_or_comment(unresolved_publication, monkeypatch, when):
+    _, source, _, jira = unresolved_publication
+    jira.failure = (("POST", "/issue/RHAI-1/comment"), when)
+    assert run(monkeypatch, source) == 1
+    assert set(jira.issues) == {source.stem, "RHAI-1"}
+    assert run(monkeypatch, source) == 0
+    assert len(jira.issues["RHAI-1"]["fields"]["comment"]) == 1
+    assert set(jira.issues) == {source.stem, "RHAI-1"}

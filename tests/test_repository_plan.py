@@ -107,7 +107,9 @@ def test_unresolved_destination_is_explicit_and_never_defaults(inputs, resolutio
     context, draft = inputs
     draft["work_items"][1]["resolution"] = resolution
     plan = module("repository_plan").finalize_repository_plan(context, draft)
-    assert plan["ready_for_drafting"] is False
+    assert plan["ready_for_drafting"] is True
+    assert "target_repository" not in plan["scopes"][0]
+    assert plan["scopes"][0]["repository_warning"]
     assert plan["unresolved"][0]["work_item_id"] == "W2"
 
 
@@ -136,7 +138,7 @@ def test_explicit_repository_input_conflict_stays_unresolved(inputs):
     draft["explicit_repositories"] = [{"value": "dashboard", "work_item_ids": ["W1"],
                                        "source_quote": "HLR-1: Manager logs."}]
     plan = module("repository_plan").finalize_repository_plan(context, draft)
-    assert plan["ready_for_drafting"] is False
+    assert plan["ready_for_drafting"] is True
     assert any(u["reason"] == "explicit_repository_conflict" for u in plan["unresolved"])
 
 

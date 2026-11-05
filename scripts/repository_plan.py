@@ -18,6 +18,9 @@ from repository_context import (SCHEMA_DIR, digest, load_repository_context,
                                 validate_context_snapshot)
 from rhai_config import RepositoryError, load_config
 
+REPOSITORY_WARNING = ("The target repository is missing or unresolved. Confirm and update the target "
+                      "repository before starting work on this epic.")
+
 TARGET_FIELDS = ("inventory_key", "provider", "host", "namespace", "repository")
 
 
@@ -157,37 +160,12 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
             if expected is None or destinations.get(wid) != expected:
                 unresolved.append({"work_item_id": wid, "reason": "explicit_repository_conflict",
                                    "candidates": [expected] if expected else []})
-    # A missing destination blocks its whole PR and all transitive dependents,
-    # while independent PRs and Investigations remain available for drafting.
+    # Keep unresolved PRs available for creation without inventing a target.
     blocked = {entry["work_item_id"] for entry in unresolved if entry["work_item_id"] is not None}
-    pr_members = defaultdict(set)
-    for item in items.values():
-        if item["kind"] == "implementation":
-            pr_members[item["planned_pr"]].add(item["id"])
-    while True:
-        added = False
-        for item in items.values():
-            if item["id"] in blocked:
-                continue
-            peers = pr_members[item["planned_pr"]] if item["kind"] == "implementation" else set()
-            peer_blockers = peers & blocked
-            dependency_blockers = set(item["depends_on"]) & blocked
-            if peer_blockers or dependency_blockers:
-                blocked.add(item["id"])
-                unresolved.append({"work_item_id": item["id"],
-                    "reason": "planned_pr_blocked" if peer_blockers else "dependency_unresolved",
-                    "blocked_by": sorted(peer_blockers | dependency_blockers), "candidates": []})
-                added = True
-        if not added:
-            break
     groups = defaultdict(list)
     for item in items.values():
-        if item["id"] in blocked:
-            continue
         if item["kind"] == "investigation":
             scope_id = f"investigation/{item['id']}"
-        elif item["id"] not in destinations:
-            continue
         else:
             scope_id = f"pr/{item['planned_pr']}"
         groups[scope_id].append(item)
@@ -196,8 +174,8 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
     for scope_id, members in sorted(groups.items()):
         first = members[0]
         if first["kind"] == "implementation":
-            targets = {destinations[item["id"]] for item in members}
-            if len(targets) != 1:
+            targets = {destinations[item["id"]] for item in members if item["id"] in destinations}
+            if len(targets) > 1:
                 raise RepositoryError("A planned PR must target a single repository")
             conditions = {(item.get("branch"), item.get("gated_by")) for item in members}
             if len(conditions) != 1:
@@ -212,10 +190,13 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                  "dependencies": sorted({item_scope[dep] for i in members for dep in i["depends_on"]
                                          if dep in item_scope and item_scope[dep] != scope_id})}
         if first["kind"] == "implementation":
-            entry = inventory[destinations[first["id"]]]
             scope["planned_pr"] = first["planned_pr"]
-            scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
-            scope["target_label"] = entry["label"]
+            if any(item["id"] in blocked for item in members):
+                scope["repository_warning"] = REPOSITORY_WARNING
+            else:
+                entry = inventory[destinations[first["id"]]]
+                scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
+                scope["target_label"] = entry["label"]
             if first.get("branch"):
                 scope.update(branch=first["branch"], gated_by=item_scope[first["gated_by"]])
         scopes.append(scope)
@@ -258,6 +239,8 @@ def validate_epic_scopes(plan: dict, epics: list[dict]) -> None:
         expected_type = "Implementation" if scope["kind"] == "implementation" else "Investigation"
         if epic.get("type") != expected_type or epic.get("target_repository") != scope.get("target_repository"):
             raise RepositoryError("Epic type/target conflicts with repository scope")
+        if epic.get("repository_warning") != scope.get("repository_warning"):
+            raise RepositoryError("Epic repository warning conflicts with repository scope")
         if epic.get("components") != scope["components"] or epic.get("component") != scope["components"][0]:
             raise RepositoryError("Epic components conflict with repository scope")
         if epic.get("implementation_type") != scope["implementation_type"]:
