@@ -193,7 +193,7 @@ def _verify_issue(entry, issue, source):
         raise RepositoryError(f"{issue['key']}: conflicting Jira parent")
     if "repo_url" in entry:
         if (fields.get(entry["repo_url_field"]) or None) != entry["repo_url"]:
-            raise RepositoryError(f"{issue['key']}: conflicting or missing repo-url; reconcile explicitly")
+            raise RepositoryError(f"{issue['key']}: conflicting or missing repository URL (customfield_10933); reconcile explicitly")
         desired = entry["desired"]
         if (fields.get("summary") != desired["summary"]
                 or fields.get("description") != desired["description_adf"]
@@ -233,7 +233,7 @@ def _resolve(entry, record, source, credentials):
 
 
 def _repository_url_field(credentials):
-    """Require the named URL custom field on the RHAI Epic create screen."""
+    """Require the existing URL field customfield_10933 on the RHAI Epic create screen."""
     from submit import TARGET_PROJECT, TARGET_ISSUE_TYPE
 
     def pages(path, key):
@@ -257,15 +257,15 @@ def _repository_url_field(credentials):
     if len(types) != 1:
         raise RepositoryError("Cannot uniquely resolve the RHAI Epic issue type")
     fields = pages(f"/issue/createmeta/{TARGET_PROJECT}/issuetypes/{types[0]['id']}", "fields")
-    matches = [field for field in fields if field.get("name") == "repo-url"]
+    matches = [field for field in fields if field.get("fieldId", field.get("key")) == "customfield_10933"]
     if len(matches) != 1:
-        raise RepositoryError("RHAI Epics require exactly one custom URL field named repo-url on the create screen")
+        raise RepositoryError("RHAI Epics require URL field customfield_10933 on the create screen")
     field = matches[0]
     field_id = field.get("fieldId", field.get("key", ""))
     schema = field.get("schema", {})
-    if (re.fullmatch(r"customfield_\d+", field_id) is None or schema.get("type") != "string"
+    if (field_id != "customfield_10933" or schema.get("type") != "string"
             or schema.get("custom") != "com.atlassian.jira.plugin.system.customfieldtypes:url"):
-        raise RepositoryError("The repo-url field must be a Jira URL custom field")
+        raise RepositoryError("customfield_10933 (URL) must be a Jira URL custom field")
     return field_id
 
 

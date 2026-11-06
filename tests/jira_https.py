@@ -45,7 +45,7 @@ class LocalJira:
         if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes":
             return {"issueTypes": [{"id": "10000", "name": "Epic"}], "total": 1}
         if method == "GET" and path == "/issue/createmeta/RHAI/issuetypes/10000":
-            return {"fields": [{"fieldId": "customfield_99901", "name": "repo-url",
+            return {"fields": [{"fieldId": "customfield_10933", "name": "URL",
                                "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:url"}}], "total": 1}
         if method == "GET" and path == "/myself":
             return {"accountId": "synthetic-account", "active": True}

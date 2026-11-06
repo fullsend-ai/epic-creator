@@ -126,18 +126,18 @@ continue to use Epic Creator's fixed RHAI conventions.
 
 Dry-run performs local validation without Jira writes. Publication also checks
 the current approved Jira source and content before writing. Each resolved initial create
-sets the canonical HTTPS repository URL in the custom URL field named `repo-url`
-and includes all components. The publisher resolves the field ID from the RHAI
-Epic create metadata, so no site-specific custom-field ID is hard-coded. Jira
-must have exactly one field with that name, of the URL type, available on the
-RHAI Epic create screen (and its edit/view screens for normal use). Missing, ambiguous or incorrectly typed fields block
-publication before any writes. This field setup is an administrator prerequisite;
-the publisher does not create or rename Jira fields.
+sets the canonical HTTPS repository URL in the existing Jira URL field
+`customfield_10933` (display name `URL`) and includes all components. The publisher
+selects that exact ID from RHAI Epic create metadata and verifies its URL type.
+The field must be available on the RHAI Epic create screen (and its edit/view
+screens for normal use). Missing, duplicate or incorrectly typed metadata blocks
+publication before any writes. The publisher does not create or rename fields;
+no new `repo-url` field is required.
 
-Unresolved Epics and Investigations leave `repo-url` empty. Unresolved Epics keep
+Unresolved Epics and Investigations leave `customfield_10933` empty. Unresolved Epics keep
 the existing warning in their description and comment. Repository labels are no
 longer added; unrelated classification and retry-identity labels remain. Recovery
-verifies `repo-url` against the reviewed target and stops on missing or changed
+verifies `customfield_10933` against the reviewed target and stops on missing or changed
 values rather than silently rewriting a published epic. Existing publications
 with the old label contract require explicit reconciliation; the publisher does
 not migrate or relabel existing Jira issues. Published issues retain the

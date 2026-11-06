@@ -23,7 +23,7 @@ class Jira:
 
     def __init__(self):
         self.issues = {}
-        self.repo_fields = [{"fieldId": "customfield_99901", "name": "repo-url",
+        self.repo_fields = [{"fieldId": "customfield_10933", "name": "URL",
                              "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:url"}}]
         self.links = set()
         self.writes = []

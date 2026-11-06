@@ -181,8 +181,8 @@ def test_complete_repository_creation_through_https(tmp_path, local_jira, certif
     creates = [r["body"]["fields"] for r in local_jira.requests if r["method"] == "POST" and r["path"] == "/rest/api/3/issue"]
     assert len(creates) == (2 if cross else 1)
     assert not any(l.startswith("target-repo-") for f in creates for l in f["labels"])
-    assert {f["customfield_99901"] for f in creates} == ({"https://github.com/example/operator", "https://github.com/example/dashboard"} if cross else {"https://github.com/example/operator"})
-    operator = next(f for f in creates if f["customfield_99901"] == "https://github.com/example/operator")
+    assert {f["customfield_10933"] for f in creates} == ({"https://github.com/example/operator", "https://github.com/example/dashboard"} if cross else {"https://github.com/example/operator"})
+    operator = next(f for f in creates if f["customfield_10933"] == "https://github.com/example/operator")
     assert operator["components"] == [{"name": "Operator"}, {"name": "Cloudmanager"}]
     assert operator["parent"] == {"key": w.key}
     assert "Manager logging tests pass" in json.dumps(operator["description"])
@@ -243,8 +243,8 @@ def test_three_planned_prs_create_three_epics_in_two_repositories(tmp_path, loca
     created = {key: issue["fields"] for key, issue in local_jira.issues.items() if key != w.key}
     assert len(created) == 3
     assert all(fields["issuetype"] == {"name": "Epic"} for fields in created.values())
-    assert sum(fields.get("customfield_99901") == "https://github.com/example/operator" for fields in created.values()) == 2
-    assert sum(fields.get("customfield_99901") == "https://github.com/example/dashboard" for fields in created.values()) == 1
+    assert sum(fields.get("customfield_10933") == "https://github.com/example/operator" for fields in created.values()) == 2
+    assert sum(fields.get("customfield_10933") == "https://github.com/example/dashboard" for fields in created.values()) == 1
     manager = next(key for key, fields in created.items()
                    if "Manager logging tests pass" in json.dumps(fields["description"]))
     cloudmanager = next(key for key, fields in created.items()
@@ -301,8 +301,8 @@ def test_partial_plan_creates_eight_epics_and_keeps_source_incomplete(tmp_path, 
     created = {key: issue["fields"] for key, issue in local_jira.issues.items() if key != w.key}
     assert len(created) == 8
     assert all(fields["issuetype"] == {"name": "Epic"} for fields in created.values())
-    assert sum(fields.get("customfield_99901") == "https://github.com/example/operator" for fields in created.values()) == 4
-    assert sum(fields.get("customfield_99901") == "https://github.com/example/dashboard" for fields in created.values()) == 3
+    assert sum(fields.get("customfield_10933") == "https://github.com/example/operator" for fields in created.values()) == 4
+    assert sum(fields.get("customfield_10933") == "https://github.com/example/dashboard" for fields in created.values()) == 3
     assert STRAT_LABEL not in local_jira.issues[w.key]["fields"]["labels"]
     before = deepcopy(local_jira.writes)
     w.submit()
