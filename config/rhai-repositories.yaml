@@ -1,0 +1,34 @@
+# Enable after approved contribution destinations and their owners are populated.
+schema_version: 1
+enabled: false
+repository_policy:
+  mode: one-implementation-epic-per-planned-pr
+  inventory:
+    source_id: contribution-policy
+    path: config/rhai/repository-inventory.yaml
+  guidance:
+    source_id: rhai-guidance
+    path: config/rhai/repository-guidance.md
+  sources:
+  - id: contribution-policy
+    url: self
+    ref: HEAD
+    paths:
+    - config/rhai/repository-inventory.yaml
+    - config/rhai/contribution-rules.md
+    role: authoritative
+    owner: pending-rhai-owner-confirmation
+  - id: mapping-document
+    url: self
+    ref: HEAD
+    paths:
+    - config/rhai/repository-mapping.md
+    role: supporting
+    owner: pending-mapping-owner-confirmation
+  - id: rhai-guidance
+    url: self
+    ref: HEAD
+    paths:
+    - config/rhai/repository-guidance.md
+    role: supporting
+    owner: pending-rhai-owner-confirmation

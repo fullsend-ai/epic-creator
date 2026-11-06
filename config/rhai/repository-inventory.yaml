@@ -1,0 +1,4 @@
+# Populate with approved contribution destinations before enabling repository mode.
+version: 1
+revision: pending-contribution-approval
+repositories: []

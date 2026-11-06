@@ -510,7 +510,10 @@ def _hook_checkout(tmp_path):
     checkout = tmp_path / "checkout"
     scripts = checkout / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/pipeline_state.py", scripts / "pipeline_state.py")
+    for name in ("pipeline_state.py", "pipeline_repositories.py", "pipeline_status.py",
+                 "rhai_config.py", "artifact_utils.py", "repository_sources.py"):
+        shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    shutil.copytree(ROOT / "config", checkout / "config")
     state = checkout / "tmp/pipeline-state.yaml"
     state.parent.mkdir()
     state.write_text("phase: DECOMPOSE\n")
