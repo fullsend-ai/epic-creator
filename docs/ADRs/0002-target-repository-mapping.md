@@ -90,10 +90,16 @@ before any Jira writes. The field must be available on the Epic create screen.
 Do not create a new repository field or use repository labels as the target
 contract. Preserve unrelated workflow and classification labels.
 
-Unresolved implementation Epics retain their work and dependencies, carry an
-explicit missing-repository warning, and omit the URL. Their source remains
-incomplete. Investigation Epics also omit the repository URL. Invalid plans,
-stale inputs and failures to retrieve required evidence still stop processing.
+Unresolved implementation Epics retain their work and dependencies and omit the
+repository URL. Add the following warning to both the Epic description and a
+comment, deduplicating the comment across retries:
+
+> The target repository is missing or unresolved. Confirm and update the target
+> repository before starting work on this epic.
+
+Their source remains incomplete. Investigation Epics also omit the repository
+URL. Invalid plans, stale inputs and failures to retrieve required evidence still
+stop processing.
 
 ### Preserve the reviewed assignment through publication and recovery
 
