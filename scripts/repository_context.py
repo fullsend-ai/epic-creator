@@ -114,6 +114,7 @@ def load_repository_context(selected, source_path: Path, artifacts_dir: Path) ->
         guidance = _load_guidance(policy, sources)
     except (RepositoryError, OSError, KeyError, StopIteration, UnicodeError, yaml.YAMLError):
         return {**context, "status": "blocked", "reason": "source_unavailable",
+                "retryable": True,
                 "inventory": {}, "sources": [], "digest": digest({**context, "cache_root": None})}
     result = {**context, "status": "ready", "sources": sources, "inventory": inventory,
               "strategy_path": str(Path(source_path).resolve()), "inventory_document": inventory_data,

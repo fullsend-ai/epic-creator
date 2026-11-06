@@ -58,6 +58,20 @@ def load_config(path=None):
     path = Path(path) if path is not None else CONFIG_PATH
     try:
         data = yaml.safe_load(path.read_text())
+        if not isinstance(data, dict) or not isinstance(data.get("schema_version"), int):
+            raise RepositoryError("Cannot load the fixed RHAI repository configuration")
+
+        # Keep the legacy pipeline independent from repository-mode inputs.  In
+        # particular, a disabled feature must not fail because the new
+        # repository policy is empty, its schema is unavailable, or a source
+        # path is stale.  We still bind the top-level switch and schema version
+        # so an accidental malformed config is visible when the file is read.
+        if data.get("enabled") is False:
+            return RhaiConfig(version=data["schema_version"], digest=_digest(data),
+                repository_policy=None, planning_digest=_digest({"configuration": data}))
+
+        if data.get("enabled") is not True:
+            raise RepositoryError("RHAI repository configuration must set enabled to true or false")
         schema = json.loads((ROOT / "config/_schema/rhai-repositories.schema.json").read_text())
         errors = list(Draft202012Validator(schema).iter_errors(data))
         if errors:

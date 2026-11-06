@@ -89,6 +89,12 @@ work stay intact. Plans with pending resolution set `partial: true`; the source
 is not marked fully decomposed. Invalid source bindings, evidence or global plan
 conflicts still block creation.
 
+If the repository context itself cannot be fetched (for example because of a
+temporary authentication, network or source-availability failure), the plan is
+blocked with `reason: source_unavailable` and `retryable: true`. This is not a
+claim that the repository is absent or permanently unmapped; refresh the pinned
+inputs and review again once the source is available.
+
 For troubleshooting a single fetched strategy:
 
 ```bash

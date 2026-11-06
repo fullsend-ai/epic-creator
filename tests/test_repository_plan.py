@@ -30,6 +30,17 @@ def test_manager_cloudmanager_grouped_before_epic_files_exist(inputs, tmp_path):
     assert not (tmp_path / "artifacts/epic-tasks").exists()
 
 
+def test_source_outage_remains_retryable_and_blocks_drafting(inputs):
+    context, draft = inputs
+    context = {**context, "status": "blocked", "reason": "source_unavailable", "retryable": True}
+
+    plan = module("repository_plan").finalize_repository_plan(context, draft)
+
+    assert plan["ready_for_drafting"] is False
+    assert plan["unresolved"] == [{"work_item_id": None, "reason": "source_unavailable",
+                                   "candidates": [], "retryable": True}]
+
+
 def test_cross_repo_work_keeps_real_dependency(inputs):
     context, draft = inputs
     draft["work_items"][1]["resolution"]["target_key"] = "dashboard"
@@ -157,5 +168,25 @@ def test_conditional_pr_keeps_its_gate_beside_unconditional_work_in_the_same_rep
     conditional = next(s for s in implementations if s["planned_pr"] == "PR-cloudmanager")
     assert conditional["work_item_ids"] == ["W2"]
     assert conditional["branch"] == "A"
+    assert conditional["gated_by"] == "investigation/I1"
+    assert conditional["dependencies"] == ["investigation/I1"]
+
+
+def test_investigation_gate_is_preserved_without_branch(inputs):
+    context, draft = inputs
+    gate = deepcopy(draft["work_items"][0])
+    gate.update(id="I1", kind="investigation", description="Confirm compatible log convention")
+    gate.pop("resolution")
+    gate.pop("planned_pr")
+    draft["work_items"].append(gate)
+    draft["work_items"][1].update(planned_pr="PR-cloudmanager", gated_by="I1",
+                                   depends_on=["I1"])
+
+    api = module("repository_plan")
+    plan = api.finalize_repository_plan(context, draft)
+    conditional = next(s for s in plan["scopes"] if s.get("planned_pr") == "PR-cloudmanager")
+
+    assert plan["ready_for_drafting"] is True
+    assert conditional.get("branch") is None
     assert conditional["gated_by"] == "investigation/I1"
     assert conditional["dependencies"] == ["investigation/I1"]

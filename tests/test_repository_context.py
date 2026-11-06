@@ -65,4 +65,5 @@ def test_unavailable_source_returns_explicit_blocked_context(tmp_path, architect
     context = module("repository_context").load_repository_context(selected, source, tmp_path / "artifacts")
     assert context["status"] == "blocked"
     assert context["reason"] == "source_unavailable"
+    assert context["retryable"] is True
     assert context["inventory"] == {}

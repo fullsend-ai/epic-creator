@@ -79,7 +79,8 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                    "mapping_snapshot_digest": context["digest"], "proposal": proposal,
                    "requirements": [], "work_items": [], "scopes": [],
                    "unresolved": [{"work_item_id": None, "reason": context.get("reason", "source_unavailable"),
-                                   "candidates": []}], "complete": True, "ready_for_drafting": False}
+                                   "candidates": [], "retryable": context.get("retryable", False)}],
+                   "complete": True, "ready_for_drafting": False}
         return {**payload, "digest": digest(payload)}
     validate_context_snapshot(context)
     schema = json.loads((SCHEMA_DIR / "repository-plan.schema.json").read_text())
@@ -198,7 +199,9 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                 scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
                 scope["target_label"] = entry["label"]
             if first.get("branch"):
-                scope.update(branch=first["branch"], gated_by=item_scope[first["gated_by"]])
+                scope["branch"] = first["branch"]
+            if first.get("gated_by"):
+                scope["gated_by"] = item_scope[first["gated_by"]]
         scopes.append(scope)
     for scenario in _scenarios(scopes):
         ids = {scope["scope_id"] for scope in scenario}

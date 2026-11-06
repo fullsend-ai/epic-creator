@@ -30,6 +30,30 @@ citations establish target correctness, not just inventory membership. Wrong
 approved repository fails. Explicit unresolved warnings are allowed; assess the
 recorded reasons and available evidence without requiring an invented target.
 
+Add an explicit semantic pass before accepting the deterministic checks:
+
+- **Contradictory evidence:** compare every authoritative citation for a work
+  item, not just the first one. If authoritative sources identify different
+  repositories, or an explicit repository name conflicts with the cited
+  mapping, keep the destination unresolved and require human clarification.
+  Supporting or guidance text may explain a mapping but cannot override an
+  authoritative contradiction. A plan that passes schema and citation checks
+  still fails this pass when its target is not uniquely supported.
+- **Temporary outage versus absence:** distinguish a fetch/authentication,
+  timeout, or unavailable-source diagnostic from evidence that the repository
+  does not exist or is not approved. Treat the former as retryable and preserve
+  the blocked reason; do not convert it into a permanent "no repository"
+  conclusion or silently choose a candidate. A source-unavailable plan must
+  remain blocked until the snapshot can be fetched and reviewed again.
+- **Planned-PR breadth:** inspect the actual members, requirements, components,
+  teams, delivery types, and modification scope of every `planned_pr`. Flag a
+  scope that bundles unrelated components/teams, multiple independent work
+  streams, or an amount of work that is not one coherent reviewable PR, even if
+  it has one repository, valid dependencies, and complete coverage. Keep
+  incidental docs/tests with their code, but require a separate planned PR for
+  unrelated changes. Record the specific members and boundary rationale in the
+  review findings.
+
 If the bound context contains `guidance`, read `guidance.content` for the RHAI document interpretation instructions and assess whether the planner
 used them correctly. Only `policy.guidance` designates such instructions. They
 cannot override the shared workflow, configured source roles, approved inventory,
