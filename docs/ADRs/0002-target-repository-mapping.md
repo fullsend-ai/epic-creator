@@ -101,6 +101,13 @@ Their source remains incomplete. Investigation Epics also omit the repository
 URL. Invalid plans, stale inputs and failures to retrieve required evidence still
 stop processing.
 
+### Human approval before coding
+
+The current workflow requires a human to approve each Epic before coding starts.
+Repository assignment and publication do not replace that approval. The reviewer
+must confirm the target repository and resolve any missing-repository warning
+before approving implementation.
+
 ### Preserve the reviewed assignment through publication and recovery
 
 Bind the plan to its strategy inputs, workload policy, inventory revision and
