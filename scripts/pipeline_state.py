@@ -87,7 +87,7 @@ PHASE_CONFIG = {
     "REVISE_DECOMP": {
         "type": "agent",
         "prompt": "skills/epic-decompose/prompts/revise-agent.md",
-        "ids_file": "tmp/pipeline-active-ids.txt",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise_decomp",
         "vars": {"ID": "{ID}"},
     },
@@ -229,32 +229,56 @@ def advance(state, dry_run=False):
             _compute_ai_scores("tmp/pipeline-active-ids.txt")
         return nxt, f"{phase} → {nxt}"
 
-    # --- REVIEW_DECOMP → REVISE_DECOMP (unconditional first revision) ---
+    # --- REVIEW_DECOMP → REVISE_DECOMP (skip IDs with a clean pass) ---
     if phase == "REVIEW_DECOMP":
+        from artifact_utils import read_frontmatter
+        # Revise every ID unless its review passed with no issues at all.
+        # A pass with minor issues is still revised (all feedback applied);
+        # a missing, unreadable or self-contradictory review (pass: true with
+        # a failing score or a revise recommendation) is revised to be safe.
+        revise_ids = []
+        for strat_id in _read_ids("tmp/pipeline-active-ids.txt"):
+            review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
+            clean_pass = False
+            if os.path.exists(review_path):
+                try:
+                    data, _ = read_frontmatter(review_path)
+                    score = data.get("score") if data else None
+                    clean_pass = bool(data and data.get("pass") is True
+                                      and data.get("recommendation") == "accept"
+                                      and isinstance(score, int) and score >= 10
+                                      and not data.get("issues")
+                                      and not data.get("error"))
+                except Exception:
+                    pass
+            if not clean_pass:
+                revise_ids.append(strat_id)
+        if not revise_ids:
+            return ("BATCH_DONE",
+                    "REVIEW_DECOMP → BATCH_DONE: all reviews passed"
+                    " with no issues, revise skipped")
         if not dry_run:
+            _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             # Clear the ``revised`` default so the poller sees IDs as pending.
             # The schema sets revised: false on creation, but the poller
             # treats any non-None value as "completed".
-            for strat_id in _read_ids("tmp/pipeline-active-ids.txt"):
+            for strat_id in revise_ids:
                 decomp = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
                 if os.path.exists(decomp):
                     _reset_revised_flag(decomp)
-        return "REVISE_DECOMP", "REVIEW_DECOMP → REVISE_DECOMP: first revision (unconditional)"
+        return ("REVISE_DECOMP",
+                f"REVIEW_DECOMP → REVISE_DECOMP: {len(revise_ids)} to revise")
 
     # --- REVISE_DECOMP → RE_REVIEW_CHECK ---
     if phase == "REVISE_DECOMP":
         if not dry_run:
-            _compute_ai_scores("tmp/pipeline-active-ids.txt")
+            _compute_ai_scores("tmp/pipeline-revise-ids.txt")
         return "RE_REVIEW_CHECK", "REVISE_DECOMP → RE_REVIEW_CHECK"
 
     # --- RE_REVIEW_CHECK: did revision change anything? ---
     if phase == "RE_REVIEW_CHECK":
         from artifact_utils import read_frontmatter
-        cycle = state.get("revise_cycle", 0)
-        if cycle == 0:
-            check_ids = _read_ids("tmp/pipeline-active-ids.txt")
-        else:
-            check_ids = _read_ids("tmp/pipeline-revise-ids.txt")
+        check_ids = _read_ids("tmp/pipeline-revise-ids.txt")
         revised_ids = []
         for strat_id in check_ids:
             decomp_path = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
