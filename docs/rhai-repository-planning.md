@@ -10,8 +10,9 @@ Edit [`config/rhai-repositories.yaml`](../config/rhai-repositories.yaml). The
 configuration is checked against its JSON schema when pipeline commands run.
 
 - `inventory` selects a YAML file listing approved contribution destinations,
-  their canonical identities, stable `target-repo-<inventory_key>` labels and
-  approval references. Start with the schema in
+  their canonical identities and approval references. Historical
+  `target-repo-<inventory_key>` labels remain part of the inventory input format;
+  the publisher does not add these labels to Jira. Start with the schema in
   [`config/_schema/repository-inventory.schema.json`](../config/_schema/repository-inventory.schema.json).
 - `sources` selects Git repositories and paths. Each has an explicit ref, owner
   and `authoritative` or `supporting` role. HTTPS repository, file and directory
@@ -131,8 +132,21 @@ continue to use Epic Creator's fixed RHAI conventions.
 
 Dry-run performs local validation without Jira writes. Publication also checks
 the current approved Jira source and content before writing. Each resolved initial create
-includes its repository label and all components. Unresolved Epics omit the
-repository label and include the warning. Published issues retain the
+sets the canonical HTTPS repository URL in the existing Jira URL field
+`customfield_10933` (display name `URL`) and includes all components. The publisher
+selects that exact ID from RHAI Epic create metadata and verifies its URL type.
+The field must be available on the RHAI Epic create screen (and its edit/view
+screens for normal use). Missing, duplicate or incorrectly typed metadata blocks
+publication before any writes. The publisher does not create or rename fields;
+no new `repo-url` field is required.
+
+Unresolved Epics and Investigations leave `customfield_10933` empty. Unresolved Epics keep
+the existing warning in their description and comment. Repository labels are no
+longer added; unrelated classification and retry-identity labels remain. Recovery
+verifies `customfield_10933` against the reviewed target and stops on missing or changed
+values rather than silently rewriting a published epic. Existing publications
+with the old label contract require explicit reconciliation; the publisher does
+not migrate or relabel existing Jira issues. Published issues retain the
 canonical target, source hashes, inventory revision, scope and work evidence.
 Conditional branch plans are attached to their Investigation gate. Publishing
 eligible Epics from a partial plan does not apply the source's fully decomposed

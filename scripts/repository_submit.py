@@ -93,7 +93,7 @@ def preflight(selected, key, root):
             summary=entry["title"], description_adf=jira.markdown_to_adf(description),
             priority=entry["priority"], labels=entry["labels"],
             components=entry.get("components", [entry["component"]] if entry["component"] else []),
-            parent_key=key)
+            parent_key=key, repo_url=entry["repo_url"])
         reviewed = {name: value for name, value in by_id[entry["epic_id"]].items() if name != "jira_key"}
         gated_branches = [({name: value for name, value in data.items() if name != "jira_key"}, body)
                           for (_, gate), items in sorted(branches.items()) if gate == entry["epic_id"]
@@ -191,11 +191,9 @@ def _verify_issue(entry, issue, source):
     parent = (fields.get("parent") or {}).get("key")
     if parent != source:
         raise RepositoryError(f"{issue['key']}: conflicting Jira parent")
-    if "repository_label" in entry:
-        actual = {label for label in fields.get("labels", []) if label.startswith("target-repo-")}
-        expected_labels = {entry["repository_label"]} if entry["repository_label"] else set()
-        if actual != expected_labels:
-            raise RepositoryError(f"{issue['key']}: conflicting or missing repository label; reconcile explicitly")
+    if "repo_url" in entry:
+        if (fields.get(entry["repo_url_field"]) or None) != entry["repo_url"]:
+            raise RepositoryError(f"{issue['key']}: conflicting or missing repository URL (customfield_10933); reconcile explicitly")
         desired = entry["desired"]
         if (fields.get("summary") != desired["summary"]
                 or fields.get("description") != desired["description_adf"]
@@ -226,12 +224,49 @@ def _resolve(entry, record, source, credentials):
         raise RepositoryError(f"{entry['epic_id']}: conflicting Jira keys; reconcile duplicates manually")
     if keys:
         key = keys.pop()
-        issue = jira.get_issue(*credentials, key, fields=["project", "issuetype", "labels", "parent", "summary", "description", "components"])
+        issue = jira.get_issue(*credentials, key, fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", entry["repo_url_field"]])
         _verify_issue(entry, issue, source)
         return key
     if record:
         raise RepositoryError(f"{entry['epic_id']}: prior create outcome unknown; wait for search or reconcile manually")
     return None
+
+
+def _repository_url_field(credentials):
+    """Require the existing URL field customfield_10933 on the RHAI Epic create screen."""
+    from submit import TARGET_PROJECT, TARGET_ISSUE_TYPE
+
+    def pages(path, key):
+        values, start = [], 0
+        while True:
+            server, user, token = credentials
+            result = jira.api_call_with_retry(server,
+                f"{path}?startAt={start}&maxResults=100", user, token)
+            batch = result.get(key)
+            if not isinstance(batch, list):
+                raise RepositoryError("Jira returned invalid create-field metadata")
+            values.extend(batch)
+            start += len(batch)
+            if result.get("isLast") is True or ("total" in result and start >= result["total"]):
+                return values
+            if not batch:
+                raise RepositoryError("Jira returned incomplete create-field metadata")
+
+    types = [item for item in pages(f"/issue/createmeta/{TARGET_PROJECT}/issuetypes", "issueTypes")
+             if item.get("name") == TARGET_ISSUE_TYPE]
+    if len(types) != 1:
+        raise RepositoryError("Cannot uniquely resolve the RHAI Epic issue type")
+    fields = pages(f"/issue/createmeta/{TARGET_PROJECT}/issuetypes/{types[0]['id']}", "fields")
+    matches = [field for field in fields if field.get("fieldId", field.get("key")) == "customfield_10933"]
+    if len(matches) != 1:
+        raise RepositoryError("RHAI Epics require URL field customfield_10933 on the create screen")
+    field = matches[0]
+    field_id = field.get("fieldId", field.get("key", ""))
+    schema = field.get("schema", {})
+    if (field_id != "customfield_10933" or schema.get("type") != "string"
+            or schema.get("custom") != "com.atlassian.jira.plugin.system.customfieldtypes:url"):
+        raise RepositoryError("customfield_10933 (URL) must be a Jira URL custom field")
+    return field_id
 
 
 @contextmanager
@@ -241,6 +276,11 @@ def publication(submission, root, credentials):
     key, plan = submission["key"], submission["plan"]
     from repository_context import assert_context_current
     assert_context_current(submission["repository_context"], selected, root / f"strat-tasks/{key}.md")
+    # Resolve before any mutation, including unresolved/Investigation-only batches.
+    field_id = _repository_url_field(credentials)
+    for entry in plan:
+        entry["repo_url_field"] = field_id
+        entry["custom_fields"] = {field_id: entry["repo_url"]} if entry["repo_url"] else {}
     with _journal(root, key, credentials[0]) as (path, journal):
         source = _source_issue(selected, submission, credentials)
         if set(journal["epics"]) - {entry["epic_id"] for entry in plan}:
@@ -281,7 +321,7 @@ def publication(submission, root, credentials):
                 raise RepositoryError(f"{eid}: Jira returned an invalid created key")
             _save_journal(path, journal)
             issue = jira.get_issue(*credentials, record["jira_key"],
-                fields=["project", "issuetype", "labels", "parent", "summary", "description", "components"])
+                fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", entry["repo_url_field"]])
             _verify_issue(entry, issue, key)
             warn(entry, record["jira_key"])
             return record["jira_key"]
