@@ -93,6 +93,23 @@ components from `.context/rhai-components.txt`. Delivery types are
 `general`, `docs-authoring`, `konflux-onboarding`, `license-validation`,
 `repo-onboarding`.
 
+Plan Investigation gates before drafting: whenever a work item directly depends
+on an Investigation, set `gated_by` to that Investigation work ID, even for
+main-plan work without a `branch`. The gate must be a direct dependency. If
+several Investigations are prerequisites, retain them all in `depends_on` and
+identify the primary scope/existence gate in `gated_by`. Items sharing a planned
+PR must share the same gate. Use `branch` only for a specific conditional outcome;
+do not invent a branch for unconditional work. Later drafting copies this gate
+exactly and explains its failure impact; it cannot add or change planned gates.
+
+Before finalizing, give prerequisites the highest priority of the work they
+transitively enable (P0 before P1 before P2). Documentation authoring does not
+raise its prerequisites' priorities; its own priority comes from the strategy
+priority (Critical=P0, Major=P1, otherwise P2). A later drafting/revision worker
+cannot change bound priorities or dependencies to repair planning omissions.
+Documentation authoring must include technical review against the implementation
+and architecture/source material as explicit acceptance criteria.
+
 Every `acceptance_refs` entry must appear in an acceptance criterion's
 `source_ref`. Additional criteria may trace the item's assigned `requirement_refs`.
 Do not reference a requirement or AC assigned only to another work item.

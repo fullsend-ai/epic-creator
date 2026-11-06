@@ -141,6 +141,59 @@ def test_revision_content_change_forces_rereview_despite_false_flag(monkeypatch,
     assert next_phase == "RE_REVIEW"
 
 
+@pytest.mark.parametrize("phase", ["REVISE_DECOMP", "RE_REVISE"])
+@pytest.mark.parametrize("revised", [False, True])
+def test_dispatcher_accepts_completed_revision_then_requests_fresh_review(monkeypatch, tmp_path, capsys, phase, revised):
+    import pipeline_state
+    import yaml
+    source, plan, metadata, review_path = reviewed_decomposition(monkeypatch, tmp_path, capsys)
+    review = {**metadata, "strat_id": source.stem, "score": 10, "pass": False,
+              "recommendation": "revise", "repository_plan_digest": plan["digest"],
+              "reviewed_decomposition_digest": repository_plan.decomposition_digest(plan, Path("artifacts"), source.stem)}
+    write_artifact(review_path, review, "decomp-review", body="Improve acceptance criteria\n")
+    state = pipeline_state._load_state()
+    state.update(phase=phase, revise_cycle=1 if phase == "RE_REVISE" else 0)
+    pipeline_state._write_ids("tmp/pipeline-revise-ids.txt", [source.stem])
+    pipeline_state._save_state(state)
+    pipeline_state._reset_revised_flag(f"artifacts/epic-tasks/{source.stem}-decomposition.md")
+    pipeline_repositories.validate_inputs(state, phase, [source.stem])
+    path = Path(f"artifacts/epic-tasks/{epic_metadata(plan)[0]['epic_id']}.md")
+    path.write_text(path.read_text() + "\nAcceptance criteria clarified.\n")
+    summary = Path(f"artifacts/epic-tasks/{source.stem}-decomposition.md")
+    artifacts.update_frontmatter(summary, {"revised": revised}, "decomp-summary")
+    capsys.readouterr()
+    pipeline_state.cmd_next_action([])
+    action = yaml.safe_load(capsys.readouterr().out)
+    assert action["phase"] == "RE_REVIEW"
+    assert action["action"] == "launch_wave"
+    assert not review_path.exists()
+    assert pipeline_state.read_status(source.stem) is None
+
+
+def test_revision_rejects_stale_review_before_worker_completion(monkeypatch, tmp_path, capsys):
+    import pipeline_state
+    source, plan, metadata, review_path = reviewed_decomposition(monkeypatch, tmp_path, capsys)
+    review = {**metadata, "strat_id": source.stem, "score": 10, "pass": False,
+              "recommendation": "revise", "repository_plan_digest": plan["digest"],
+              "reviewed_decomposition_digest": repository_plan.decomposition_digest(plan, Path("artifacts"), source.stem)}
+    write_artifact(review_path, review, "decomp-review", body="Improve acceptance criteria\n")
+    pipeline_state._reset_revised_flag(f"artifacts/epic-tasks/{source.stem}-decomposition.md")
+    path = Path(f"artifacts/epic-tasks/{epic_metadata(plan)[0]['epic_id']}.md")
+    path.write_text(path.read_text() + "\nChanged before revision.\n")
+    with pytest.raises(RepositoryError, match="Review no longer matches"):
+        pipeline_repositories.validate_inputs(pipeline_state._load_state(), "REVISE_DECOMP", [source.stem])
+
+
+def test_drafter_validation_checks_epics_as_well_as_plan(monkeypatch, tmp_path, capsys):
+    source, plan, _, _ = reviewed_decomposition(monkeypatch, tmp_path, capsys)
+    monkeypatch.setattr(sys, "argv", ["repository_plan.py", "validate", "--source", source.stem, "--include-epics"])
+    assert repository_plan.main() == 0
+    path = Path(f"artifacts/epic-tasks/{epic_metadata(plan)[0]['epic_id']}.md")
+    artifacts.update_frontmatter(path, {"gated_by": "RHAISTRAT-9001-E999"}, "epic-task")
+    assert repository_plan.main() == 1
+    assert "gate conflicts" in capsys.readouterr().err
+
+
 def test_revision_check_reports_broken_repository_binding(monkeypatch, tmp_path, capsys):
     import pipeline_state
     source, _, _, _ = reviewed_decomposition(monkeypatch, tmp_path, capsys)

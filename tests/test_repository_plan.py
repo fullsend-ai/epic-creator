@@ -62,6 +62,39 @@ def test_epic_gate_must_match_its_repository_scope(inputs):
         api.validate_epic_scopes(plan, epics)
 
 
+@pytest.mark.parametrize("gate", [None, "W2", "unknown"])
+def test_investigation_dependency_requires_explicit_valid_gate(inputs, gate):
+    context, draft = inputs
+    investigation = deepcopy(draft["work_items"][0])
+    investigation.update(id="I1", kind="investigation")
+    investigation.pop("planned_pr")
+    investigation.pop("resolution")
+    draft["work_items"].append(investigation)
+    for item in draft["work_items"][:2]:
+        item["depends_on"] = ["I1"]
+        if gate is not None:
+            item["gated_by"] = gate
+    with pytest.raises(RepositoryError, match="Investigation.*gate|gate.*Investigation"):
+        module("repository_plan").finalize_repository_plan(context, draft)
+
+
+def test_unconditional_pr_preserves_investigation_gate(inputs):
+    context, draft = inputs
+    investigation = deepcopy(draft["work_items"][0])
+    investigation.update(id="I1", kind="investigation")
+    investigation.pop("planned_pr")
+    investigation.pop("resolution")
+    draft["work_items"].append(investigation)
+    for item in draft["work_items"][:2]:
+        item.update(depends_on=["I1"], gated_by="I1")
+    api = module("repository_plan")
+    plan = api.finalize_repository_plan(context, draft)
+    scope = next(s for s in plan["scopes"] if s["kind"] == "implementation")
+    assert scope["gated_by"] == "investigation/I1"
+    assert "branch" not in scope
+    api.validate_epic_scopes(plan, epic_metadata(plan))
+
+
 @pytest.mark.parametrize("destination,count", [("operator", 1), ("guidelines", 2)])
 def test_documentation_follows_publication_repo(inputs, destination, count):
     context, draft = inputs

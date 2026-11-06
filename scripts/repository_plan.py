@@ -114,10 +114,11 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
             raise RepositoryError("Work item acceptance criteria do not cover assigned source ACs")
         if any(dep not in items or dep == item["id"] for dep in item["depends_on"]):
             raise RepositoryError("Unknown or self-referencing work dependency")
-        if item.get("branch"):
+        investigation_dependencies = [dep for dep in item["depends_on"] if items[dep]["kind"] == "investigation"]
+        if item.get("gated_by") or investigation_dependencies or item.get("branch"):
             gate = items.get(item.get("gated_by"))
             if gate is None or gate["kind"] != "investigation" or gate["id"] not in item["depends_on"]:
-                raise RepositoryError("Conditional work requires an Investigation dependency")
+                raise RepositoryError("Investigation dependencies require an explicit gate naming a direct Investigation dependency")
     deferred = {entry["id"] for entry in proposal.get("deferred", [])
                 if entry["id"] in requirements and _quote(entry["source_quote"], text)}
     if coverage | deferred != requirements.keys():
@@ -200,8 +201,8 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                 scope["target_label"] = entry["label"]
             if first.get("branch"):
                 scope["branch"] = first["branch"]
-            if first.get("gated_by"):
-                scope["gated_by"] = item_scope[first["gated_by"]]
+        if first.get("gated_by"):
+            scope["gated_by"] = item_scope[first["gated_by"]]
         scopes.append(scope)
     for scenario in _scenarios(scopes):
         ids = {scope["scope_id"] for scope in scenario}
@@ -286,7 +287,10 @@ def main():
     parser.add_argument("command", choices=("prepare", "finalize", "validate"))
     parser.add_argument("--source", required=True)
     parser.add_argument("--artifacts-dir", default="artifacts", type=Path)
+    parser.add_argument("--include-epics", action="store_true", help="Also validate drafted Epic assignments (validate only)")
     args = parser.parse_args()
+    if args.include_epics and args.command != "validate":
+        parser.error("--include-epics requires validate")
     try:
         selected = load_config()
         selected.validate_identity(args.source)
@@ -307,7 +311,14 @@ def main():
                     selected.validate_component(item["component"], components)
             atomic_json(locations["plan"], plan)
             return 0 if plan["ready_for_drafting"] else 2
-        validate_repository_plan(json.loads(locations["plan"].read_text()), context)
+        plan = json.loads(locations["plan"].read_text())
+        validate_repository_plan(plan, context)
+        if args.include_epics:
+            from artifact_utils import read_frontmatter_validated
+            epics = [read_frontmatter_validated(path, "epic-task")[0]
+                     for path in sorted((args.artifacts_dir / "epic-tasks").glob(f"{args.source}-*.md"))
+                     if re.fullmatch(rf"{re.escape(args.source)}-(?:BRANCH-[A-Z]-)?E\d{{3}}", path.stem)]
+            validate_epic_scopes(plan, epics)
         return 0
     except (RepositoryError, OSError, ValueError, KeyError) as exc:
         print(f"Repository planning failed: {exc}", file=sys.stderr)

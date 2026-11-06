@@ -53,6 +53,10 @@ scope's homogeneous `implementation_type`; omit it for mixed/general scopes.
 Set summary `mapping_snapshot_digest` too. Map scope dependencies to generated
 epic IDs, including dependencies between PRs in the same repository; preserve
 branch/gate semantics. Do not fold conditional PRs into unconditional Epics.
+Copy `gated_by` only when present in the scope, translating its scope ID to the
+generated Epic ID; omit it otherwise. This exact binding overrides the later
+legacy rule to infer gates from Investigation dependencies. Report a missing
+planned gate as a planning defect rather than inventing one during drafting.
 
 Read the displayed epic schema and set these fields using `frontmatter.py set
 --source`, as with existing metadata. Example additional arguments (substitute
@@ -65,7 +69,7 @@ repository_scope=pr/PR-001 'work_item_ids=["W1","W2"]' \
 ```
 
 Repo names above are illustrative, not evidence. Before marking decomposition
-complete, run `python3 scripts/repository_plan.py validate --source {ID}` and compare every scope/work/AC and dependency to
+complete, run `python3 scripts/repository_plan.py validate --source {ID} --include-epics` and compare every scope/work/AC and dependency to
 its epic. The dispatcher separately validates generated epic assignments. If the
 plan itself is wrong, report the blocking defect; do not silently rewrite it.
 

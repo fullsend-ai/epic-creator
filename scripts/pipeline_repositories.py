@@ -105,7 +105,7 @@ def source_metadata(state, key, artifacts_dir="artifacts"):
     return metadata
 
 
-def validate_artifact(state, key, path, schema, artifacts_dir="artifacts"):
+def validate_artifact(state, key, path, schema, artifacts_dir="artifacts", *, require_current_review=True):
     source = source_metadata(state, key, artifacts_dir)
     data = _read(path, schema)
     identity = "parent_strat" if schema in ("decomp-summary", "epic-task") else "strat_id"
@@ -120,7 +120,7 @@ def validate_artifact(state, key, path, schema, artifacts_dir="artifacts"):
         from repository_plan import decomposition_digest
         plan = repository_plan_for(state, key, artifacts_dir)
         if (data.get("repository_plan_digest") != plan["digest"]
-                or data.get("reviewed_decomposition_digest") != decomposition_digest(plan, Path(artifacts_dir), key)):
+                or (require_current_review and data.get("reviewed_decomposition_digest") != decomposition_digest(plan, Path(artifacts_dir), key))):
             raise RepositoryError("Review no longer matches repository plan or decomposition content")
     return data
 
@@ -168,4 +168,9 @@ def validate_inputs(state, phase, ids):
         if phase in ("REVIEW_DECOMP", "RE_REVIEW", "REVISE_DECOMP", "RE_REVISE"):
             validate_decomposition(state, key)
         if phase in ("REVISE_DECOMP", "RE_REVISE"):
-            validate_artifact(state, key, f"artifacts/epic-reviews/{key}-decomp-review.md", "decomp-review")
+            from check_decompose_progress import check_id
+            # A finished revision intentionally invalidates the prior content digest.
+            # Keep source/plan checks; RE_REVIEW_CHECK will require a fresh review.
+            completed = check_id("revise_decomp", key) == "completed"
+            validate_artifact(state, key, f"artifacts/epic-reviews/{key}-decomp-review.md", "decomp-review",
+                              require_current_review=not completed)
