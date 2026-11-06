@@ -106,17 +106,6 @@ plan. A missing or conflicting URL on a resolved Epic requires explicit
 reconciliation; the publisher must not silently overwrite it or create a
 duplicate issue. Automatic migration of existing issues is outside this decision.
 
-## Alternatives considered
-
-- **Assign repositories after drafting:** can leave acceptance criteria spanning
-  repositories and require scope changes after review.
-- **Use Jira Components or a static lookup alone:** cannot adequately represent
-  ambiguous ownership, architecture boundaries or contribution destinations.
-- **Use product/upstream mapping alone:** supplies repository relationships but
-  lacks the architectural context needed to place a specific code change.
-- **Publish repository labels or create a new field:** adds a separate identity
-  convention when the existing URL field can carry the full canonical target.
-
 ## Consequences
 
 - Epic boundaries align with reviewable PRs and a single contribution repository,
