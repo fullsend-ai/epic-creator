@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
+from pipeline_status import all_statuses
 
 
 def main():
@@ -18,7 +19,14 @@ def main():
         all_ids = [line.strip() for line in f if line.strip()]
 
     error_ids = []
+    statuses = all_statuses()
     for strat_id in all_ids:
+        status = statuses.get(strat_id)
+        if status and status["status"] == "skipped":
+            continue
+        if status and status["status"] == "invalid":
+            error_ids.append(strat_id)
+            continue
         decomp = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
         review = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
 
