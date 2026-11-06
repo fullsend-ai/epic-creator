@@ -24,7 +24,7 @@ def selected():
     return workload.get_workload("rhai-initiative")
 
 
-def source(key="RHOAIENG-9001"):
+def source(key="RHAISTRAT-9001"):
     w = selected()
     return dict(strat_id=key, title="Synthetic strategy", workload_id=w.id,
                 labels=list(w.ready_labels),
@@ -35,13 +35,13 @@ def source(key="RHOAIENG-9001"):
                 attachment_id="9001", attachment_created="2026-10-13T09:00:00Z")
 
 
-def write_source(key="RHOAIENG-9001"):
+def write_source(key="RHAISTRAT-9001"):
     path = Path(f"artifacts/strat-tasks/{key}.md")
     artifacts.write_frontmatter(path, source(key), "strat-task", body="# Synthetic strategy\n")
     return path
 
 
-def init(monkeypatch, tmp_path, capsys, key="RHOAIENG-9001"):
+def init(monkeypatch, tmp_path, capsys, key="RHAISTRAT-9001"):
     monkeypatch.chdir(tmp_path)
     pipeline.cmd_init(["--workload", "rhai-initiative"])
     pipeline._write_ids("tmp/pipeline-active-ids.txt", [key])
@@ -91,7 +91,7 @@ def test_default_init_keeps_legacy_artifacts(monkeypatch, tmp_path, capsys):
 def test_dispatch_selects_policy_for_every_agent_phase(monkeypatch, tmp_path, capsys, phase, policy):
     init(monkeypatch, tmp_path, capsys)
     write_source()
-    pipeline._write_ids("tmp/pipeline-revise-ids.txt", ["RHOAIENG-9001"])
+    pipeline._write_ids("tmp/pipeline-revise-ids.txt", ["RHAISTRAT-9001"])
     pipeline.cmd_set_phase([phase])
     capsys.readouterr()
     pipeline.cmd_get_phase_config([])
@@ -133,7 +133,7 @@ def test_registry_rejects_unsafe_or_missing_policy(monkeypatch, tmp_path, unsafe
 
 def test_completed_source_without_metadata_cannot_release_fetch(monkeypatch, tmp_path, capsys):
     init(monkeypatch, tmp_path, capsys)
-    path = Path("artifacts/strat-tasks/RHOAIENG-9001.md")
+    path = Path("artifacts/strat-tasks/RHAISTRAT-9001.md")
     path.parent.mkdir(parents=True)
     path.write_text("Already cached but unidentifiable\n")
     pipeline.cmd_set_phase(["FETCH"])
@@ -143,7 +143,7 @@ def test_completed_source_without_metadata_cannot_release_fetch(monkeypatch, tmp
     assert action["action"] == "run_script"
     assert action["phase"] == "REPORT"
     assert pipeline._load_state()["phase"] == "REPORT"
-    status = pipeline_status.read_status("RHOAIENG-9001")
+    status = pipeline_status.read_status("RHAISTRAT-9001")
     assert status["status"] == "invalid"
     assert "No frontmatter" in status["message"]
 
@@ -160,7 +160,7 @@ def test_review_gate_rejects_invalid_dimensions(scores):
         selected().planning.review_result(scores)
 
 
-def generated(key="RHOAIENG-9001", schema="decomp-summary"):
+def generated(key="RHAISTRAT-9001", schema="decomp-summary"):
     metadata = {k: v for k, v in source(key).items() if k in artifacts._WORKLOAD_FIELDS}
     if schema == "decomp-summary":
         return dict(metadata, parent_strat=key, epic_count=1, critical_path_length=1,
@@ -172,13 +172,13 @@ def generated(key="RHOAIENG-9001", schema="decomp-summary"):
                 criterion_scores=[2]*7, issues=[])
 
 
-def write_decomposition(key="RHOAIENG-9001"):
+def write_decomposition(key="RHAISTRAT-9001"):
     for schema, path in [("decomp-summary", f"artifacts/epic-tasks/{key}-decomposition.md"),
                          ("epic-task", f"artifacts/epic-tasks/{key}-E001.md")]:
         artifacts.write_frontmatter(path, generated(key, schema), schema, body="Synthetic output\n")
 
 
-def cli_set(monkeypatch, path, *values, source_path="artifacts/strat-tasks/RHOAIENG-9001.md"):
+def cli_set(monkeypatch, path, *values, source_path="artifacts/strat-tasks/RHAISTRAT-9001.md"):
     monkeypatch.setattr(sys, "argv", ["frontmatter.py", "set", "--source", source_path, str(path), *values])
     frontmatter.main()
 
@@ -186,8 +186,8 @@ def cli_set(monkeypatch, path, *values, source_path="artifacts/strat-tasks/RHOAI
 def test_cli_inherits_source_provenance_without_handwritten_metadata(monkeypatch, tmp_path, capsys):
     init(monkeypatch, tmp_path, capsys)
     write_source()
-    path = Path("artifacts/epic-tasks/RHOAIENG-9001-decomposition.md")
-    cli_set(monkeypatch, path, "parent_strat=RHOAIENG-9001", "epic_count=1", "critical_path_length=1")
+    path = Path("artifacts/epic-tasks/RHAISTRAT-9001-decomposition.md")
+    cli_set(monkeypatch, path, "parent_strat=RHAISTRAT-9001", "epic_count=1", "critical_path_length=1")
     data, _ = artifacts.read_frontmatter_validated(path, "decomp-summary")
     assert data["source_revision"] == source()["source_revision"]
     assert data["planning_digest"] == selected().planning.digest
@@ -196,9 +196,9 @@ def test_cli_inherits_source_provenance_without_handwritten_metadata(monkeypatch
 def test_cli_rejects_conflicting_explicit_provenance_before_write(monkeypatch, tmp_path, capsys):
     init(monkeypatch, tmp_path, capsys)
     write_source()
-    path = Path("artifacts/epic-tasks/RHOAIENG-9001-decomposition.md")
+    path = Path("artifacts/epic-tasks/RHAISTRAT-9001-decomposition.md")
     with pytest.raises(SystemExit):
-        cli_set(monkeypatch, path, "parent_strat=RHOAIENG-9001", "epic_count=1",
+        cli_set(monkeypatch, path, "parent_strat=RHAISTRAT-9001", "epic_count=1",
                 "critical_path_length=1", "source_revision=wrong")
     assert not path.exists()
 
@@ -213,9 +213,9 @@ def test_selected_review_schema_produces_a_valid_failing_review(monkeypatch, tmp
     criteria = schema["optional"]["issues"]["items"]["fields"]["criterion"]["enum"]
     assert criteria[3] == "Type Correctness"
     assert "criterion_scores" in schema["required"]
-    path = Path("artifacts/epic-reviews/RHOAIENG-9001-decomp-review.md")
+    path = Path("artifacts/epic-reviews/RHAISTRAT-9001-decomp-review.md")
     issue = {"severity": "major", "criterion": criteria[3], "description": "Missing Investigation gate"}
-    cli_set(monkeypatch, path, "strat_id=RHOAIENG-9001", "score=11", "pass=false",
+    cli_set(monkeypatch, path, "strat_id=RHAISTRAT-9001", "score=11", "pass=false",
             "recommendation=revise", "criterion_scores=[2,2,2,0,2,1,2]",
             "issues=" + json.dumps([issue]))
     review, _ = artifacts.read_frontmatter_validated(path, "decomp-review")
@@ -236,7 +236,7 @@ def test_cli_rejects_noncanonical_typed_component_without_changing_artifact(monk
     frontmatter.main()
     assert yaml.safe_load(capsys.readouterr().out)["required"]["component"]["enum"] == ["Model Validation"]
     write_source()
-    path = Path("artifacts/epic-tasks/RHOAIENG-9001-E001.md")
+    path = Path("artifacts/epic-tasks/RHAISTRAT-9001-E001.md")
     data = generated(schema="epic-task")
     data["component"] = "Model Validation"
     artifacts.write_frontmatter(path, data, "epic-task", body="Reviewed work\n")
@@ -253,9 +253,9 @@ def test_stage_rejects_missing_epic_provenance(monkeypatch, tmp_path, capsys, br
     init(monkeypatch, tmp_path, capsys)
     write_source()
     write_decomposition()
-    path = Path("artifacts/epic-tasks/RHOAIENG-9001-E001.md")
+    path = Path("artifacts/epic-tasks/RHAISTRAT-9001-E001.md")
     if branch:
-        path = Path("artifacts/epic-tasks/RHOAIENG-9001-BRANCH-A-E002.md")
+        path = Path("artifacts/epic-tasks/RHAISTRAT-9001-BRANCH-A-E002.md")
         data = generated(schema="epic-task")
         data["epic_id"] = path.stem
         artifacts.write_frontmatter(path, data, "epic-task")
@@ -267,7 +267,7 @@ def test_stage_rejects_missing_epic_provenance(monkeypatch, tmp_path, capsys, br
     pipeline.cmd_next_action([])
     action = yaml.safe_load(capsys.readouterr().out)
     assert action["phase"] == "REPORT"
-    status = pipeline_status.read_status("RHOAIENG-9001")
+    status = pipeline_status.read_status("RHAISTRAT-9001")
     assert status["status"] == "invalid"
     assert "provenance" in status["message"]
 
@@ -275,13 +275,13 @@ def test_stage_rejects_missing_epic_provenance(monkeypatch, tmp_path, capsys, br
 def test_completed_summary_without_epics_cannot_release_stage(monkeypatch, tmp_path, capsys):
     init(monkeypatch, tmp_path, capsys)
     write_source()
-    artifacts.write_frontmatter("artifacts/epic-tasks/RHOAIENG-9001-decomposition.md", generated(), "decomp-summary")
+    artifacts.write_frontmatter("artifacts/epic-tasks/RHAISTRAT-9001-decomposition.md", generated(), "decomp-summary")
     pipeline.cmd_set_phase(["DECOMPOSE"])
     capsys.readouterr()
     pipeline.cmd_next_action([])
     action = yaml.safe_load(capsys.readouterr().out)
     assert action["phase"] == "REPORT"
-    status = pipeline_status.read_status("RHOAIENG-9001")
+    status = pipeline_status.read_status("RHAISTRAT-9001")
     assert status["status"] == "invalid"
     assert "count" in status["message"]
 
@@ -290,7 +290,7 @@ def test_one_invalid_strategy_does_not_block_valid_strategy(monkeypatch, tmp_pat
     import generate_run_report
 
     init(monkeypatch, tmp_path, capsys)
-    good, bad = "RHOAIENG-9001", "RHOAIENG-9002"
+    good, bad = "RHAISTRAT-9001", "RHAISTRAT-9002"
     write_source(good)
     write_source(bad)
     write_decomposition(good)
@@ -330,7 +330,7 @@ def test_source_revision_change_is_rejected_on_resume(monkeypatch, tmp_path, cap
     pipeline.cmd_next_action([])
     action = yaml.safe_load(capsys.readouterr().out)
     assert action["phase"] == "REPORT"
-    status = pipeline_status.read_status("RHOAIENG-9001")
+    status = pipeline_status.read_status("RHAISTRAT-9001")
     assert status["status"] == "invalid"
     assert "revision" in status["message"]
 
@@ -343,10 +343,10 @@ def test_review_metadata_must_agree_with_selected_rubric(monkeypatch, tmp_path, 
     data = generated(schema="decomp-review")
     data.update(changes)
     with pytest.raises(artifacts.ValidationError):
-        artifacts.write_frontmatter("artifacts/epic-reviews/RHOAIENG-9001-decomp-review.md", data, "decomp-review")
+        artifacts.write_frontmatter("artifacts/epic-reviews/RHAISTRAT-9001-decomp-review.md", data, "decomp-review")
 
 
-@pytest.mark.parametrize("key", ["../RHOAIENG-9001", "RHOAIENG-9001;touch /tmp/owned", "RHAISTRAT-9001"])
+@pytest.mark.parametrize("key", ["../RHAISTRAT-9001", "RHAISTRAT-9001;touch /tmp/owned", "RHOAIENG-9001"])
 def test_dispatch_rejects_unsafe_or_wrong_workload_ids_before_launch(monkeypatch, tmp_path, capsys, key):
     init(monkeypatch, tmp_path, capsys, key)
     pipeline.cmd_set_phase(["FETCH"])
@@ -364,9 +364,9 @@ def test_report_records_workload_and_source_revision(monkeypatch, tmp_path, caps
     init(monkeypatch, tmp_path, capsys)
     write_source()
     write_decomposition()
-    artifacts.write_frontmatter("artifacts/epic-reviews/RHOAIENG-9001-decomp-review.md",
+    artifacts.write_frontmatter("artifacts/epic-reviews/RHAISTRAT-9001-decomp-review.md",
                                generated(schema="decomp-review"), "decomp-review")
-    monkeypatch.setattr(sys, "argv", ["generate_run_report.py", "--start-time", "2026-10-13T10:00:00Z", "RHOAIENG-9001"])
+    monkeypatch.setattr(sys, "argv", ["generate_run_report.py", "--start-time", "2026-10-13T10:00:00Z", "RHAISTRAT-9001"])
     generate_run_report.main()
     report = yaml.safe_load(next(Path("artifacts/decompose-runs").glob("*.yaml")).read_text())
     assert report["workload_id"] == "rhai-initiative"
@@ -379,7 +379,7 @@ def test_report_includes_skipped_fetch_status(monkeypatch, tmp_path, capsys):
     import generate_run_report
 
     init(monkeypatch, tmp_path, capsys)
-    key = "RHOAIENG-9001"
+    key = "RHAISTRAT-9001"
     pipeline_status.write_status(key, "skipped", "fetch", "no strategy attachment")
     assert check_id("fetch", key) == "completed"
 
@@ -396,7 +396,7 @@ def test_report_records_invalid_strategy_and_continues(monkeypatch, tmp_path, ca
     import generate_run_report
 
     init(monkeypatch, tmp_path, capsys)
-    bad, good = "RHOAIENG-9001", "RHOAIENG-9002"
+    bad, good = "RHAISTRAT-9001", "RHAISTRAT-9002"
     bad_source = write_source(bad)
     write_source(good)
     artifacts.update_frontmatter(bad_source, {"labels": []}, "strat-task")
@@ -420,7 +420,7 @@ def test_cached_source_requires_original_approval_evidence(monkeypatch, tmp_path
     pipeline.cmd_next_action([])
     action = yaml.safe_load(capsys.readouterr().out)
     assert action["phase"] == "REPORT"
-    status = pipeline_status.read_status("RHOAIENG-9001")
+    status = pipeline_status.read_status("RHAISTRAT-9001")
     assert status["status"] == "invalid"
     assert "approval" in status["message"]
 
@@ -450,7 +450,7 @@ def test_component_fetch_uses_selected_policy(monkeypatch, tmp_path, capsys):
 def test_report_preserves_missing_source_failure(monkeypatch, tmp_path, capsys):
     import generate_run_report
     init(monkeypatch, tmp_path, capsys)
-    monkeypatch.setattr(sys, "argv", ["report", "--start-time", "2026-10-13T10:00:00Z", "RHOAIENG-9001"])
+    monkeypatch.setattr(sys, "argv", ["report", "--start-time", "2026-10-13T10:00:00Z", "RHAISTRAT-9001"])
     generate_run_report.main()
     report = yaml.safe_load(next(Path("artifacts/decompose-runs").glob("*.yaml")).read_text())
     assert report["results"][0]["status"] == "missing"
@@ -459,7 +459,7 @@ def test_report_preserves_missing_source_failure(monkeypatch, tmp_path, capsys):
 @pytest.mark.parametrize("alternate", [False, True])
 def test_full_dispatch_flow_is_local_and_preserves_revision_cycle(monkeypatch, tmp_path, capsys, alternate):
     import generate_run_report
-    key, workload_id = "RHOAIENG-9001", "rhai-initiative"
+    key, workload_id = "RHAISTRAT-9001", "rhai-initiative"
     if alternate:
         registry = tmp_path / "repo/workloads"
         shutil.copytree(ROOT / "workloads", registry)
@@ -575,3 +575,16 @@ def test_eval_staging_copies_workload_registry_into_isolated_case(tmp_path):
     assert (case / "workloads/rhai-initiative.yaml").is_file()
     assert not (case / "workloads").is_symlink()
     assert (case / ".context/rhai-components.txt").read_text() == "Synthetic\n"
+
+
+def test_explicit_initiative_rejects_untyped_shared_project_source(tmp_path, monkeypatch):
+    from pipeline_workload import source_metadata
+
+    monkeypatch.chdir(tmp_path)
+    key = "RHAISTRAT-9001"
+    artifacts.write_frontmatter(f"artifacts/strat-tasks/{key}.md",
+        dict(strat_id=key, title="Unidentified strategy"), "strat-task")
+    with pytest.raises(workload.WorkloadError, match="provenance conflicts"):
+        source_metadata(dict(workload_id=selected().id, workload_explicit=True,
+                             workload_version=selected().version, workload_digest=selected().digest,
+                             planning_digest=selected().planning.digest), key)

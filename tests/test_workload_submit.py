@@ -127,7 +127,7 @@ def case(tmp_path, monkeypatch):
     return registry, jira
 
 
-def setup(case, key="RHOAIENG-9001", artifacts_dir="artifacts", workload_id="rhai-initiative"):
+def setup(case, key="RHAISTRAT-9001", artifacts_dir="artifacts", workload_id="rhai-initiative"):
     registry, jira = case
     selected = workload.get_workload(workload_id)
     metadata = dict(workload_id=selected.id, workload_version=selected.version,
@@ -173,28 +173,28 @@ def run(monkeypatch, *args, workload_id="rhai-initiative"):
 def test_initiative_submission_creates_original_parent_and_provenance(case, monkeypatch):
     setup(case)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
-    assert set(jira.issues) == {"RHOAIENG-9001", "RHAI-1", "RHAI-2"}
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
+    assert set(jira.issues) == {"RHAISTRAT-9001", "RHAI-1", "RHAI-2"}
     first = jira.issues["RHAI-1"]["fields"]
-    assert first["parent"] == {"key": "RHOAIENG-9001"}
+    assert first["parent"] == {"key": "RHAISTRAT-9001"}
     assert first["issuetype"] == {"name": "Epic"}
     assert first["components"] == [{"name": "test-component"}]
     assert "epic-creator-investigation" in first["labels"]
     assert first["assignee"] == {"accountId": "synthetic-account"}
     assert ("Blocks", "RHAI-1", "RHAI-2") in jira.links
-    assert "epic-creator-auto-decomposed" in jira.issues["RHOAIENG-9001"]["fields"]["labels"]
-    data, _ = artifacts.read_frontmatter("artifacts/epic-tasks/RHOAIENG-9001-E001.md")
+    assert "epic-creator-auto-decomposed" in jira.issues["RHAISTRAT-9001"]["fields"]["labels"]
+    data, _ = artifacts.read_frontmatter("artifacts/epic-tasks/RHAISTRAT-9001-E001.md")
     assert data["jira_key"] == "RHAI-1"
-    assert data["source_key"] == "RHOAIENG-9001"
+    assert data["source_key"] == "RHAISTRAT-9001"
     assert any(a["filename"].startswith("RHAI-1-frontmatter-") for a in first["attachment"])
 
 
 def test_rerun_has_no_duplicate_issues_links_or_attachments(case, monkeypatch):
     setup(case)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     before = deepcopy(jira.issues), set(jira.links), list(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert (jira.issues, jira.links, jira.writes) == before
 
 
@@ -203,11 +203,11 @@ def test_rerun_has_no_duplicate_issues_links_or_attachments(case, monkeypatch):
 def test_typed_submission_rejects_unknown_component_before_writes(case, monkeypatch, capsys, branch, dry_run):
     root = setup(case)
     _, jira = case
-    target = add_branch(root) if branch else root / "epic-tasks/RHOAIENG-9001-E002.md"
+    target = add_branch(root) if branch else root / "epic-tasks/RHAISTRAT-9001-E002.md"
     artifacts.update_frontmatter(target,
                                 {"component": "unregistered-component"}, "epic-task")
     args = ["--dry-run"] if dry_run else []
-    assert run(monkeypatch, *args, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, *args, "RHAISTRAT-9001") == 1
     assert jira.writes == []
     assert "component" in capsys.readouterr().err
 
@@ -221,7 +221,7 @@ def test_typed_dry_run_requires_component_cache(case, monkeypatch, capsys, empty
         cache.write_text("\n")
     else:
         cache.unlink()
-    assert run(monkeypatch, "--dry-run", "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "--dry-run", "RHAISTRAT-9001") == 1
     assert jira.writes == []
     assert "fetch_components" in capsys.readouterr().err
 
@@ -239,14 +239,14 @@ def test_submission_uses_selected_destination_labels_and_link_policy(case, monke
     data["source"]["processed_label"] = "synthetic-processed"
     path.write_text(yaml.safe_dump(data))
     setup(case)
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     fields = jira.issues["OTHER-1"]["fields"]
     assert fields["issuetype"] == {"name": "Task"}
     assert "parent" not in fields
     assert "synthetic-created" in fields["labels"]
-    assert ("Relates", "RHOAIENG-9001", "OTHER-1") in jira.links
+    assert ("Relates", "RHAISTRAT-9001", "OTHER-1") in jira.links
     assert ("Requires", "OTHER-1", "OTHER-2") in jira.links
-    assert "synthetic-processed" in jira.issues["RHOAIENG-9001"]["fields"]["labels"]
+    assert "synthetic-processed" in jira.issues["RHAISTRAT-9001"]["fields"]["labels"]
 
 
 @pytest.mark.parametrize("broken", ["missing_epic", "invalid_epic", "mixed_provenance", "failed_review",
@@ -254,8 +254,8 @@ def test_submission_uses_selected_destination_labels_and_link_policy(case, monke
 def test_preflight_rejects_whole_artifact_set_before_any_write(case, monkeypatch, broken):
     root = setup(case)
     _, jira = case
-    epic = root / "epic-tasks/RHOAIENG-9001-E002.md"
-    review = root / "epic-reviews/RHOAIENG-9001-decomp-review.md"
+    epic = root / "epic-tasks/RHAISTRAT-9001-E002.md"
+    review = root / "epic-reviews/RHAISTRAT-9001-decomp-review.md"
     if broken == "missing_epic":
         epic.unlink()
     elif broken == "invalid_epic":
@@ -266,19 +266,19 @@ def test_preflight_rejects_whole_artifact_set_before_any_write(case, monkeypatch
         artifacts.update_frontmatter(review, {"score": 7, "criterion_scores": [1]*7,
             "pass": False, "recommendation": "revise"}, "decomp-review")
     elif broken == "unknown_dependency":
-        artifacts.update_frontmatter(epic, {"dependencies": ["RHOAIENG-9001-E099"]}, "epic-task")
+        artifacts.update_frontmatter(epic, {"dependencies": ["RHAISTRAT-9001-E099"]}, "epic-task")
     elif broken == "cycle":
-        artifacts.update_frontmatter(root / "epic-tasks/RHOAIENG-9001-E001.md",
-            {"dependencies": ["RHOAIENG-9001-E002"]}, "epic-task")
+        artifacts.update_frontmatter(root / "epic-tasks/RHAISTRAT-9001-E001.md",
+            {"dependencies": ["RHAISTRAT-9001-E002"]}, "epic-task")
     elif broken == "missing_source":
-        (root / "strat-tasks/RHOAIENG-9001.md").unlink()
+        (root / "strat-tasks/RHAISTRAT-9001.md").unlink()
     elif broken == "missing_approval":
-        jira.issues["RHOAIENG-9001"]["fields"]["labels"] = []
+        jira.issues["RHAISTRAT-9001"]["fields"]["labels"] = []
     else:
         data, body = artifacts.read_frontmatter(epic)
-        data.update(epic_id="RHOAIENG-9001-BRANCH-A-E003", branch="A", gated_by="RHOAIENG-9001-E099")
-        artifacts.write_frontmatter(root / "epic-tasks/RHOAIENG-9001-BRANCH-A-E003.md", data, "epic-task", body=body)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+        data.update(epic_id="RHAISTRAT-9001-BRANCH-A-E003", branch="A", gated_by="RHAISTRAT-9001-E099")
+        artifacts.write_frontmatter(root / "epic-tasks/RHAISTRAT-9001-BRANCH-A-E003.md", data, "epic-task", body=body)
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == []
 
 
@@ -286,14 +286,14 @@ def test_preflight_rejects_whole_artifact_set_before_any_write(case, monkeypatch
     (('POST', '/issueLink'), 'before'), (('POST', '/issueLink'), 'after'),
     (('POST', '/issue/RHAI-1/attachments'), 'before'),
     (('POST', '/issue/RHAI-1/attachments'), 'after'),
-    (('PUT', '/issue/RHOAIENG-9001'), 'before')])
+    (('PUT', '/issue/RHAISTRAT-9001'), 'before')])
 def test_rerun_recovers_each_failed_phase(case, monkeypatch, operation, when):
     setup(case)
     _, jira = case
     jira.failure = (operation, when)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
-    assert "epic-creator-auto-decomposed" not in jira.issues["RHOAIENG-9001"]["fields"]["labels"]
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
+    assert "epic-creator-auto-decomposed" not in jira.issues["RHAISTRAT-9001"]["fields"]["labels"]
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert len(jira.issues) == 3
     assert jira.links == {("Blocks", "RHAI-1", "RHAI-2")}
     for key in ("RHAI-1", "RHAI-2"):
@@ -307,10 +307,10 @@ def test_recovers_created_issue_when_local_key_was_not_saved(case, monkeypatch):
     def fail_once(path, updates, schema):
         raise OSError("synthetic journal write failure")
     monkeypatch.setattr(artifacts, "update_frontmatter", fail_once)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert len(jira.issues) == 2
     monkeypatch.setattr(artifacts, "update_frontmatter", original)
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert len(jira.issues) == 3
 
 
@@ -318,13 +318,13 @@ def test_uncertain_create_and_stale_search_never_recreates(case, monkeypatch):
     setup(case)
     _, jira = case
     jira.failure = (("POST", "/issue"), "after")
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     jira.hidden = True
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert len(jira.issues) == 2
     assert jira.attempts.count(("POST", "/issue")) == 1
     jira.hidden = False
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert len(jira.issues) == 3
 
 
@@ -339,10 +339,10 @@ def test_create_http_error_clears_only_definite_rejection(
                         status_code, "synthetic Jira response", {}, None)
 
     monkeypatch.setattr(workload_submit.jira, "create_issue", reject_create)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
 
-    journal = json.loads(Path("artifacts/submissions/rhai-initiative/RHOAIENG-9001.json").read_text())
-    epic_record = journal["epics"].get("RHOAIENG-9001-E001")
+    journal = json.loads(Path("artifacts/submissions/rhai-initiative/RHAISTRAT-9001.json").read_text())
+    epic_record = journal["epics"].get("RHAISTRAT-9001-E001")
     assert (epic_record is not None) is record_expected
     if record_expected:
         assert epic_record["attempted"] is True
@@ -355,25 +355,25 @@ def test_invalid_journal_record_cannot_erase_a_pending_create(case, monkeypatch,
     setup(case)
     _, jira = case
     jira.failure = (("POST", "/issue"), "after")
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
-    path = Path("artifacts/submissions/rhai-initiative/RHOAIENG-9001.json")
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
+    path = Path("artifacts/submissions/rhai-initiative/RHAISTRAT-9001.json")
     data = json.loads(path.read_text())
-    data["epics"]["RHOAIENG-9001-E001"] = corrupt_record
+    data["epics"]["RHAISTRAT-9001-E001"] = corrupt_record
     path.write_text(json.dumps(data))
     jira.hidden = True
     before = list(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == before
 
 
 def test_duplicate_recovery_matches_stop_without_writes(case, monkeypatch):
     setup(case)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     jira.issues["RHAI-99"] = deepcopy(jira.issues["RHAI-1"])
     jira.issues["RHAI-99"]["key"] = "RHAI-99"
     before = len(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert len(jira.writes) == before
 
 
@@ -381,7 +381,7 @@ def test_incomplete_recovery_search_is_not_treated_as_no_match(case, monkeypatch
     setup(case)
     _, jira = case
     jira.incomplete = True
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == []
 
 
@@ -390,8 +390,8 @@ def test_dry_run_is_local_only_and_accepts_custom_artifacts_dir(case, monkeypatc
     _, jira = case
     assert run(monkeypatch, "--dry-run", "--artifacts-dir", "custom", "--all") == 0
     output = capsys.readouterr().out
-    assert "RHOAIENG-9001-E001" in output
-    assert "parent: RHOAIENG-9001" in output
+    assert "RHAISTRAT-9001-E001" in output
+    assert "parent: RHAISTRAT-9001" in output
     assert "Blocks" in output
     assert "epic-creator-auto-created" in output
     assert jira.attempts == []
@@ -401,7 +401,7 @@ def test_dry_run_is_local_only_and_accepts_custom_artifacts_dir(case, monkeypatc
 def test_typed_artifacts_cannot_silently_use_legacy_submission(case, monkeypatch):
     setup(case)
     _, jira = case
-    monkeypatch.setattr(sys, "argv", ["submit.py", "RHOAIENG-9001"])
+    monkeypatch.setattr(sys, "argv", ["submit.py", "RHAISTRAT-9001"])
     with pytest.raises(SystemExit) as exc:
         submit.main()
     assert exc.value.code == 1
@@ -409,10 +409,10 @@ def test_typed_artifacts_cannot_silently_use_legacy_submission(case, monkeypatch
 
 
 def add_branch(root):
-    data, _ = artifacts.read_frontmatter(root / "epic-tasks/RHOAIENG-9001-E002.md")
-    data.update(epic_id="RHOAIENG-9001-BRANCH-A-E003", branch="A",
-                gated_by="RHOAIENG-9001-E001", dependencies=["RHOAIENG-9001-E001"])
-    path = root / "epic-tasks/RHOAIENG-9001-BRANCH-A-E003.md"
+    data, _ = artifacts.read_frontmatter(root / "epic-tasks/RHAISTRAT-9001-E002.md")
+    data.update(epic_id="RHAISTRAT-9001-BRANCH-A-E003", branch="A",
+                gated_by="RHAISTRAT-9001-E001", dependencies=["RHAISTRAT-9001-E001"])
+    path = root / "epic-tasks/RHAISTRAT-9001-BRANCH-A-E003.md"
     artifacts.write_frontmatter(path, data, "epic-task", body="Synthetic conditional work\n")
     return path
 
@@ -421,12 +421,12 @@ def test_conditional_epics_are_attached_to_gate_without_creating_issues(case, mo
     root = setup(case)
     add_branch(root)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert len(jira.issues) == 3
     assert len(jira.issues["RHAI-1"]["fields"]["attachment"]) == 2
     assert any("branch-a-plan-" in a["filename"] for a in jira.issues["RHAI-1"]["fields"]["attachment"])
     before = list(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     assert jira.writes == before
 
 
@@ -434,10 +434,10 @@ def test_recovery_identity_survives_moving_the_artifact_directory(case, monkeypa
     root = setup(case)
     add_branch(root)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     shutil.copytree(root, "moved")
     before = list(jira.writes)
-    assert run(monkeypatch, "--artifacts-dir", "moved", "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "--artifacts-dir", "moved", "RHAISTRAT-9001") == 0
     assert jira.writes == before
 
 
@@ -446,8 +446,8 @@ def test_changed_reviewed_content_cannot_reuse_an_existing_epic(case, monkeypatc
     root = setup(case)
     branch = add_branch(root)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
-    epic = root / "epic-tasks/RHOAIENG-9001-E001.md"
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
+    epic = root / "epic-tasks/RHAISTRAT-9001-E001.md"
     if change_kind == "team":
         artifacts.update_frontmatter(epic, {"team": "Different"}, "epic-task")
     else:
@@ -455,7 +455,7 @@ def test_changed_reviewed_content_cannot_reuse_an_existing_epic(case, monkeypatc
         with path.open("a") as stream:
             stream.write("Different reviewed content\n")
     before = list(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == before
 
 
@@ -506,33 +506,33 @@ def test_description_strategy_rerun_accepts_own_label_revision(case, monkeypatch
 def test_existing_issue_conflicts_fail_before_mutation(case, monkeypatch, conflict):
     root = setup(case)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     fields = jira.issues["RHAI-1"]["fields"]
     if conflict == "project":
         fields["project"]["key"] = "OTHER"
     elif conflict == "type":
         fields["issuetype"]["name"] = "Bug"
     elif conflict == "parent":
-        fields["parent"]["key"] = "RHOAIENG-9002"
+        fields["parent"]["key"] = "RHAISTRAT-9002"
     elif conflict in ("identity", "content"):
         prefix = "epic-creator-id-" if conflict == "identity" else "epic-creator-plan-"
         fields["labels"] = [v for v in fields["labels"] if not v.startswith(prefix)]
     else:
-        artifacts.update_frontmatter(root / "epic-tasks/RHOAIENG-9001-E001.md", {"jira_key": "RHAI-99"}, "epic-task")
+        artifacts.update_frontmatter(root / "epic-tasks/RHAISTRAT-9001-E001.md", {"jira_key": "RHAI-99"}, "epic-task")
     before = list(jira.writes)
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == before
 
 
 def test_missing_parent_and_labels_are_reconciled(case, monkeypatch):
     setup(case)
     _, jira = case
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
     fields = jira.issues["RHAI-1"]["fields"]
     fields.pop("parent")
     fields["labels"].remove("epic-creator-investigation")
-    assert run(monkeypatch, "RHOAIENG-9001") == 0
-    assert fields["parent"] == {"key": "RHOAIENG-9001"}
+    assert run(monkeypatch, "RHAISTRAT-9001") == 0
+    assert fields["parent"] == {"key": "RHAISTRAT-9001"}
     assert "epic-creator-investigation" in fields["labels"]
     assert len(jira.issues) == 3
 
@@ -540,9 +540,9 @@ def test_missing_parent_and_labels_are_reconciled(case, monkeypatch):
 def test_unapproved_newer_strategy_attachment_blocks_submission(case, monkeypatch):
     setup(case)
     _, jira = case
-    jira.issues["RHOAIENG-9001"]["fields"]["attachment"].append({
-        "id": "9002", "filename": "RHOAIENG-9001-strategy.md", "created": "2026-10-14T09:00:00Z"})
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    jira.issues["RHAISTRAT-9001"]["fields"]["attachment"].append({
+        "id": "9002", "filename": "RHAISTRAT-9001-strategy.md", "created": "2026-10-14T09:00:00Z"})
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == []
 
 
@@ -550,11 +550,11 @@ def test_local_lock_prevents_a_second_submitter(case, monkeypatch):
     import fcntl
     setup(case)
     _, jira = case
-    path = Path("artifacts/submissions/rhai-initiative/RHOAIENG-9001.lock")
+    path = Path("artifacts/submissions/rhai-initiative/RHAISTRAT-9001.lock")
     path.parent.mkdir(parents=True)
     with path.open("a") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert run(monkeypatch, "RHOAIENG-9001") == 1
+        assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert jira.writes == []
 
 
@@ -565,6 +565,49 @@ def test_invalid_submission_descriptor_fails_without_writes(case, monkeypatch, c
     data = yaml.safe_load(path.read_text())
     data["submission"]["parent"] = {"relation": "link"}
     path.write_text(yaml.safe_dump(data))
-    assert run(monkeypatch, "RHOAIENG-9001") == 1
+    assert run(monkeypatch, "RHAISTRAT-9001") == 1
     assert "link_type" in capsys.readouterr().err
     assert jira.writes == []
+
+
+@pytest.mark.parametrize("workload_id,expected,other", [
+    ("rhai-initiative", "RHAISTRAT-9001", "RHAISTRAT-9002"),
+    ("rhaistrat-strategy", "RHAISTRAT-9002", "RHAISTRAT-9001"),
+])
+def test_all_selects_workload_identity_in_shared_project(case, monkeypatch, capsys,
+                                                       workload_id, expected, other):
+    setup(case, key="RHAISTRAT-9001", workload_id="rhai-initiative")
+    setup(case, key="RHAISTRAT-9002", workload_id="rhaistrat-strategy")
+    assert run(monkeypatch, "--all", "--dry-run", workload_id=workload_id) == 0
+    output = capsys.readouterr().out
+    assert f"[DRY RUN] {expected}:" in output
+    assert other not in output
+    assert not case[1].writes
+
+
+def test_all_rejects_untyped_shared_project_plan(case, monkeypatch, capsys):
+    root = setup(case)
+    artifacts.write_frontmatter(root / "epic-tasks/RHAISTRAT-9002-decomposition.md",
+        dict(parent_strat="RHAISTRAT-9002", epic_count=1, critical_path_length=1),
+        "decomp-summary")
+    assert run(monkeypatch, "--all", "--dry-run") == 1
+    assert "workload identity required" in capsys.readouterr().err
+    assert not case[1].writes
+
+
+def test_legacy_submission_rejects_partial_initiative_identity(case, monkeypatch, capsys):
+    root = setup(case)
+    # Retain the tracker type but lose workload_id; this must not become a Feature.
+    for path in root.rglob("*.md"):
+        data, body = artifacts.read_frontmatter(path)
+        for name in artifacts._WORKLOAD_FIELDS:
+            data.pop(name, None)
+        if path.parent.name == "strat-tasks":
+            data.update(source_project="RHAISTRAT", source_issue_type="Initiative")
+        path.write_text("---\n" + yaml.safe_dump(data) + "---\n" + body)
+    monkeypatch.setattr(sys, "argv", ["submit.py", "RHAISTRAT-9001"])
+    with pytest.raises(SystemExit) as exc:
+        submit.main()
+    assert exc.value.code == 1
+    assert "explicit --workload" in capsys.readouterr().err
+    assert not case[1].writes

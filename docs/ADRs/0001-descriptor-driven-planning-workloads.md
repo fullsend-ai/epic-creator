@@ -40,10 +40,13 @@ descriptor and registry; the Initiative descriptor is on
 Approval is signaled by the same `strat-creator-human-sign-off` and
 `strat-creator-rubric-pass` labels for both paths. RFE strategies use a
 per-issue `{key}-strategy.md` attachment with description fallback.
-Initiative strategies use only the newest `RHOAIENG-NNNN-strategy.md`
-attachment; the description remains the Initiative's own text, and a missing
-attachment means skip. These corrections are confirmed in
+Initiative strategies use only the newest `{key}-strategy.md` attachment;
+the description remains the Initiative's own text, and a missing attachment
+means skip. The attachment-only policy is confirmed in
 [AISDLC-61 comment 18872381](https://redhat.atlassian.net/browse/AISDLC-61?focusedCommentId=18872381).
+Both source issue types now live in RHAISTRAT, so Initiative attachments use
+`RHAISTRAT-NNNN-strategy.md`; see the
+[November 6 integration review](https://github.com/fullsend-ai/epic-creator/pull/40#pullrequestreview-5803398932).
 
 ### Rationale from the RFE Creator enablement session
 

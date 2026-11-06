@@ -33,6 +33,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import (
+    _WORKLOAD_FIELDS,
     read_frontmatter,
     read_frontmatter_validated,
     update_frontmatter,
@@ -720,7 +721,7 @@ def main():
         candidates = [os.path.join(args.artifacts_dir, "strat-tasks", f"{strat_id}.md"),
                       os.path.join(args.artifacts_dir, "epic-reviews", f"{strat_id}-decomp-review.md")]
         candidates += glob.glob(os.path.join(args.artifacts_dir, "epic-tasks", f"{strat_id}-*.md"))
-        if any(read_frontmatter(path)[0].get("workload_id") for path in candidates):
+        if any(set(read_frontmatter(path)[0]) & _WORKLOAD_FIELDS.keys() for path in candidates):
             print("Error: typed artifacts require explicit --workload selection", file=sys.stderr)
             sys.exit(1)
 

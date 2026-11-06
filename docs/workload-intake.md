@@ -22,10 +22,10 @@ for read operations. Do not put their values in files or command history.
 
 ```bash
 python3 scripts/fetch_strategy.py fetch \
-  'project = RHOAIENG AND issuetype = Initiative AND labels = strat-creator-rubric-pass AND labels = strat-creator-human-sign-off AND labels != epic-creator-auto-decomposed' \
+  'project = RHAISTRAT AND issuetype = Initiative AND labels = strat-creator-rubric-pass AND labels = strat-creator-human-sign-off AND labels != epic-creator-auto-decomposed' \
   --workload rhai-initiative --skip-if-processed --ids-file tmp/initiative-ids.txt
 
-python3 scripts/fetch_strategy.py fetch-one RHOAIENG-9001 \
+python3 scripts/fetch_strategy.py fetch-one RHAISTRAT-9001 \
   --workload rhai-initiative
 ```
 
@@ -96,3 +96,15 @@ the real registry, schema validators, CLI handlers and filesystem. On upstream
 `1544ef1`, the complete baseline suite has one known failure:
 `tests/test_submit.py::TestDryRun::test_dry_run_shows_component_warning`.
 Report that separately from new intake failures.
+
+Both Feature and Initiative sources now use RHAISTRAT keys. Their issue type and
+validated workload provenance distinguish them; a key alone does not. Initiative
+artifacts must retain their workload identity and run with `--workload rhai-initiative`.
+Artifacts stripped of all provenance are indistinguishable from legacy Feature
+artifacts, which remain supported by the legacy commands. Refetch an Initiative
+rather than passing an untyped artifact to the legacy path.
+
+An attachment's frontmatter `type` is optional for compatibility with Strategy
+Creator output. When present it must match the descriptor's `handoff_type`.
+When absent, intake still validates the Jira project, issue type, approval labels,
+attachment name and any supplied identity fields, and writes typed local provenance.

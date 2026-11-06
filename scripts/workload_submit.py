@@ -319,8 +319,18 @@ def run_submission(args):
         root = Path(args.artifacts_dir)
         keys = args.strat_ids
         if args.all:
-            keys = [p.name.removesuffix("-decomposition.md") for p in sorted((root / "epic-tasks").glob("*-decomposition.md"))
-                    if re.fullmatch(selected.id_pattern, p.name.removesuffix("-decomposition.md"))]
+            keys = []
+            for path in sorted((root / "epic-tasks").glob("*-decomposition.md")):
+                key = path.name.removesuffix("-decomposition.md")
+                if not re.fullmatch(selected.id_pattern, key):
+                    continue
+                # Keys may be shared by several issue types in one project.
+                # Validate provenance before deciding which workload owns a plan.
+                data, _ = artifacts.read_frontmatter_validated(path, "decomp-summary")
+                if not data.get("workload_id"):
+                    raise WorkloadError(f"{path}: workload identity required for --all")
+                if data["workload_id"] == selected.id:
+                    keys.append(key)
         if not keys:
             raise WorkloadError("No decompositions for selected workload")
         submissions = [preflight(selected, key, root) for key in dict.fromkeys(keys)]

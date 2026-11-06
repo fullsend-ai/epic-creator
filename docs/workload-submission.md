@@ -3,8 +3,7 @@
 `submit.py --workload ID` submits reviewed, typed artifacts using the selected
 workload's destination and relationship policy. Both shipped descriptors create
 RHAI Epics under the original source issue, use Blocks dependency links, and retain
-the existing RHAI labels. Initiative submission keeps the
-RHOAIENG source key; it does not create a RHAISTRAT clone.
+the existing RHAI labels. Initiative submission parents Epics directly on the original RHAISTRAT Initiative.
 
 The planning skill still ends at REPORT. Submission is a separate explicit step;
 production Fullsend configuration and model quality evaluation remain outstanding.
@@ -21,8 +20,8 @@ Use the existing Jira environment variables through your normal credential setup
 The dry run requires no credentials, makes no network calls, and writes no journal:
 
 ```bash
-python3 scripts/submit.py --workload rhai-initiative --dry-run RHOAIENG-9001
-python3 scripts/submit.py --workload rhai-initiative RHOAIENG-9001
+python3 scripts/submit.py --workload rhai-initiative --dry-run RHAISTRAT-9001
+python3 scripts/submit.py --workload rhai-initiative RHAISTRAT-9001
 
 # Alternate artifact root, or all sources belonging to the selected workload:
 python3 scripts/submit.py --workload rhai-initiative --artifacts-dir artifacts --all --dry-run
@@ -142,3 +141,8 @@ lost responses, key-persistence failures, each partial phase, stale searches,
 duplicate/conflicting identities and invalid inputs. These establish local
 submission behavior; they do not establish production Jira configuration or
 model quality. No live Jira issues were created during implementation.
+
+`--all` selects plans by validated workload identity, because Feature and Initiative
+keys share the RHAISTRAT pattern. An untyped matching plan stops selection before
+any writes; refetch/replan it with its workload, or submit legacy Feature artifacts
+separately through the legacy command.

@@ -3,7 +3,7 @@
 Workload selection now follows a local run through FETCH, DECOMPOSE, REVIEW,
 REVISE and REPORT. Both shipped descriptors use the existing RHAI decisions:
 `rhaistrat-strategy` accepts legacy strategies and `rhai-initiative` accepts
-approved RHOAIENG Initiative attachments. The architecture is still
+approved RHAISTRAT Initiative attachments. The architecture is still
 [Proposed](ADRs/0001-descriptor-driven-planning-workloads.md).
 
 ## Where strategies and policies live
@@ -53,7 +53,7 @@ enum. Rejected writes must be corrected before the worker marks its phase done.
 In an agent environment that exposes the existing skill:
 
 ```text
-/epic-decompose RHOAIENG-9001 --workload rhai-initiative --headless
+/epic-decompose RHAISTRAT-9001 --workload rhai-initiative --headless
 ```
 
 The key above is illustrative. Use a real approved Initiative with both

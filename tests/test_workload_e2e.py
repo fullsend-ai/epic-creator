@@ -465,7 +465,7 @@ def test_cli_rejects_invalid_main_investigation_gate(workspace, invalid_gate):
 
 def test_cli_intake_uses_newest_exact_attachment_and_rejects_fallback(workspace):
     w = workspace
-    w.cli("fetch_strategy", "fetch", "project = RHOAIENG", "--ids-file", "tmp/discovered.txt",
+    w.cli("fetch_strategy", "fetch", "project = RHAISTRAT", "--ids-file", "tmp/discovered.txt",
           "--skip-if-processed", "--workload", w.workload_id)
     assert w.jira.requests[0]["path"] == "/rest/api/3/myself"
     assert (w.path / "tmp/discovered.txt").read_text().strip() == w.key
