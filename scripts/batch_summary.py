@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
+from review_utils import load_review
 
 
 def main():
@@ -35,16 +36,13 @@ def main():
 
         if os.path.exists(review):
             reviewed += 1
-            data, _ = read_frontmatter(review)
-            if data:
-                if data.get("error"):
-                    errors += 1
-                elif data.get("pass"):
-                    passed += 1
-                else:
-                    failed += 1
-        elif not os.path.exists(decomp):
+        status, _ = load_review(review)
+        if status == "error":
             errors += 1
+        elif status == "passed":
+            passed += 1
+        else:
+            failed += 1
 
     if counts_only:
         print(f"decomposed={decomposed} reviewed={reviewed} "

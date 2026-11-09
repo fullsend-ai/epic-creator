@@ -57,6 +57,10 @@ Phase completion is detected purely from **artifact sentinels on disk**
 `score`, `revised` non-None. Between decompose/revise and review,
 `scripts/compute_ai_scores.py` deterministically derives `ai_implementability` /
 `ai_implementability_score` from agent-scored signals (agents must not set these).
+Before grading, the reviewer runs `scripts/check_review_files.py {ID}` to obtain
+exact main-plan and conditional-branch epic/rationale paths and file-read errors.
+The reviser uses the same inventory with `--allow-missing` to inspect and repair
+missing rationale files. This checks file availability, not semantic quality.
 
 ## Execution Mode
 
@@ -121,9 +125,15 @@ are cleaned between runs):
   with arrows dependency → dependent, HLR Traceability Matrix, Tiered Delivery).
 - `artifacts/epic-reviews/` — `{ID}-decomp-review.md` (`strat_id`, `score` 0–14, `pass`,
   `recommendation` accept|revise, `issues`). A final `pass: false` after the capped
-  revise cycle is a legitimate outcome (`failed`, not an error).
+  revise cycle is a legitimate outcome (`failed`, not an error). Superseded review
+  attempts and their revision metadata are retained under `history/{ID}/`; only
+  the exact current-review path supplies the final status.
 - `artifacts/decompose-runs/` — `<start-timestamp>.yaml` run report
-  (`results: [{strat_id, status, epic_count, score, error}]`).
+  (`results: [{strat_id, status, epic_count, score, error,
+  review_recoveries_without_edits}]`, plus `recovered_without_edits`, the list of
+  strategies with such recovery events). A recovery means consecutive failed and
+  passing reviews with no reported decomposition corrections; it does not prove
+  that the earlier review was a false negative or that all bytes were unchanged.
 
 ## Pipeline Flow
 
@@ -132,10 +142,19 @@ are cleaned between runs):
 3. Bootstrap `.context/` (arch context + component list; one retry, then hard stop).
 4. Batch split → `tmp/pipeline-batch-N-ids.txt`.
 5. Dispatch loop on `next-action`: BATCH_START → FETCH → DECOMPOSE →
-   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (first revision
-   unconditional) → RE_REVIEW/RE_REVISE loop (cap 2 cycles) → BATCH_DONE →
-   ERROR_COLLECT (one retry batch) → REPORT → DONE. After every wave the next Bash call
-   **must** be `pipeline_state.py wait-for-wave` (exit 3 → re-run).
+   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (first revision for
+   valid quality reviews) → RE_REVIEW/RE_REVISE loop (cap 2 additional revision
+   cycles) → BATCH_DONE → ERROR_COLLECT (one retry batch) → REPORT → DONE.
+   Both revision phases use `tmp/pipeline-revise-ids.txt`; the counter and list are
+   reset per batch. Changed artifacts and failed quality reviews receive a fresh
+   review, even if revision reported `revised: false`. Unchanged passing results
+   do not need a fresh review. Missing/invalid review metadata and explicit agent
+   errors use the technical-error retry path rather than both retry budgets.
+   Superseded reviews are archived before replacement so stale files cannot
+   satisfy completion polling. After every wave the next Bash call **must** be
+   `pipeline_state.py wait-for-wave` (exit 3 → re-run).
+   Polling still treats missing or partially written review output as pending;
+   shared review validation does not infer that a stalled agent has terminated.
 6. REPORT: `generate_run_report.py`; teardown: `batch_summary.py --counts-only` prints
    `decomposed=N reviewed=N passed=N failed=N errors=N total_epics=N`.
 
