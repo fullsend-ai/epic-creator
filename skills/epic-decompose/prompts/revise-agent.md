@@ -15,7 +15,9 @@ Epic files: artifacts/epic-tasks/{ID}-E*.md
 1. Read the review file — focus on the `issues` list in frontmatter and the criterion details in the body
 2. Read the strategy file for reference
 3. Read the decomposition summary
-4. Read all epic files matching `artifacts/epic-tasks/{ID}-E*.md`
+4. Run `python3 scripts/check_review_files.py {ID} --allow-missing` and read the listed main-plan and conditional branch epic files and `rationale_file` paths marked `rationale_readable=true`.
+
+The inventory's `epic_readable` and `rationale_readable` flags describe their respective files. Use its exact paths when checking missing-file findings; do not infer absence from a search-tool result alone.
 
 ## Step 2: Apply Corrections
 
@@ -45,6 +47,7 @@ For each issue in the review's `issues` list, apply the appropriate correction:
 - **Implementation should be Investigation**: Change the `type` field to Investigation. Add downstream blocking edges to epics whose scope depends on this epic's outcome.
 
 ### AI Implementability Scoring issues
+- **Rationale file missing or unreadable**: Verify the reviewer's exact path against the deterministic inventory. If a rationale is genuinely missing, write its Signal / Value / Rationale table using the epic's type-appropriate signals, the strategy, and the decomposition rubric. If a file is unreadable, repair it only when the cause is clear and within this artifact's scope. Re-run the checker after the correction. If the file is already readable, assess its contents before disputing the finding; do not fabricate a correction merely to set `revised=true`.
 - **Signal value incorrect**: Re-evaluate the specific signal(s) the reviewer identified as wrong. Update the values in the epic's type-appropriate frontmatter field — `ai_signals` for Implementation epics, `investigation_signals` for Investigation epics — and the corresponding rationale in `artifacts/epic-tasks/{ID}-ENNN-ai-signals.md`. Do **not** update `ai_implementability` or `ai_implementability_score` — the pipeline recomputes those automatically from the signal values.
 
 ### Acceptance Criteria issues
@@ -61,31 +64,38 @@ For each issue in the review's `issues` list, apply the appropriate correction:
 
 ## Step 3: Update Decomposition Summary
 
-If no corrections were needed (review passed with no issues):
+If you dispute a finding, add a **Revision Findings** section to the decomposition summary naming the finding, the exact files checked, and the evidence for your conclusion. Record any unresolved issue there as well. This explanation is not itself a decomposition correction. Never change the review's `pass`, score, recommendation, or issues; the fresh reviewer decides whether the finding is resolved.
 
-```bash
-python3 scripts/frontmatter.py set artifacts/epic-tasks/{ID}-decomposition.md revised=false
-```
+If no decomposition corrections were needed, whether the review passed or you disputed its findings:
 
-Skip the remaining updates — nothing changed.
+Skip the remaining structural updates and finish Step 4 with `revised=false`. This means no decomposition corrections were made, not that the review passed. The pipeline re-reviews a failed quality review even with this value.
 
 If corrections were applied:
 
 1. Update the **Epic List** table to reflect any added, removed, or modified epics
 2. Update the **Dependency DAG** diagram
 3. Update the **HLR Traceability Matrix** if HLR mappings changed
-4. Update frontmatter:
-
-```bash
-python3 scripts/frontmatter.py set artifacts/epic-tasks/{ID}-decomposition.md revised=true epic_count=<N> critical_path_length=<N>
-```
+4. Recount `epic_count` and `critical_path_length` for the final frontmatter update in Step 4.
 
 ## Step 4: Verify Consistency
 
 Before finishing, verify:
+- Run `python3 scripts/check_review_files.py {ID}` again. If it still reports a missing or unreadable file you cannot repair, record the exact error under Revision Findings; do not claim the review passed.
 - All epic files have valid frontmatter with all required fields
 - No circular dependencies in the DAG
 - Every epic referenced in `dependencies` lists actually exists as a file
 - `epic_count` in the summary matches the actual number of epic files
 
-Do not return a summary. Your work is complete when you have run `frontmatter.py set` with `revised=true` (changes made) or `revised=false` (no corrections needed). The pipeline uses this field to detect that the revision agent has finished.
+Then set the completion field as your **final action**, after the checks and any Revision Findings note. If corrections were made:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/epic-tasks/{ID}-decomposition.md revised=true epic_count=<N> critical_path_length=<N>
+```
+
+Otherwise:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/epic-tasks/{ID}-decomposition.md revised=false
+```
+
+Do not return a summary. Your work is complete after this command. The pipeline uses either `revised` value to detect that the revision agent has finished; only a fresh review can approve the result.

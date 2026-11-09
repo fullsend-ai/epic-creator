@@ -198,11 +198,18 @@ outputs:
       description}), error. Body: "## Review Summary" plus seven
       "### N. <Criterion> (X/2)" sections. After the capped revise cycle, a final
       pass: false is a legitimate outcome (reported as failed, not an error).
+      Superseded attempts and revision metadata are retained under history/{strat_id}/;
+      only the exact current-review path determines the final result. Reviewers use
+      scripts/check_review_files.py to check main and branch rationale paths before
+      assessing content; the inventory does not approve semantic quality.
   - path: artifacts/decompose-runs
     schema: |
       <start-timestamp>.yaml — run report from scripts/generate_run_report.py:
       {started, completed, batch_size, total, results: [{strat_id, status
-      (missing|decomposed|error|passed|failed), epic_count, score, error}]}.
+      (missing|decomposed|error|passed|failed), epic_count, score, error,
+      review_recoveries_without_edits}], recovered_without_edits: [strat_id]}.
+      Recovery counts track consecutive failed-to-passing reviews without reported
+      decomposition corrections, not proven false negatives or byte identity.
 
 traces:
   stdout: true
@@ -261,12 +268,12 @@ judges:
         dependency against that map (:381-390), so a duplicated or copy-pasted
         epic_id silently drops a Jira Blocks link that dag_valid — which keys
         nodes by *filename* — cannot see;
-      - sentinels: decompose_complete true (decompose-agent.md:332-336) and
-        `revised` non-null. pipeline_state.py:290-299 makes the first
-        REVIEW_DECOMP -> REVISE_DECOMP transition unconditional and clears the
-        revised default so the poller waits, and
-        check_decompose_progress.py:73-84 treats non-null `revised` as the
-        revise-phase completion sentinel — so a completed run must leave it set;
+      - sentinels: decompose_complete true and `revised` non-null. The summary
+        schema initializes revised: false; revision dispatch clears it so the
+        poller waits for the agent's final action. Either boolean value marks
+        revision completion, not approval. Valid quality reviews receive the
+        first revision; technical review errors use ERROR_COLLECT. A failed
+        quality review receives a fresh review even when revised is false;
       - triage set implies a non-empty triage_rationale and exactly one epic
         (decompose-agent.md:20-34, review-agent.md:32);
       - body contract per decompose-agent.md:275-281: Description / Scope /
@@ -368,7 +375,7 @@ judges:
                            if "epic-tasks/" in p
                            and p.endswith(strat + "-decomposition.md")), None)
       review_path = next((p for p in sorted(files)
-                          if "epic-reviews/" in p
+                          if "epic-reviews/" in p and "/history/" not in p
                           and p.endswith(strat + "-decomp-review.md")), None)
 
       probs = []
@@ -392,8 +399,7 @@ judges:
           if s.get("decompose_complete") is not True:
               probs.append("summary: decompose_complete sentinel not true")
           if s.get("revised") is None:
-              probs.append("summary: revise-phase sentinel 'revised' absent"
-                           " (REVISE_DECOMP is unconditional)")
+              probs.append("summary: revise-phase sentinel 'revised' absent")
           elif not isinstance(s.get("revised"), bool):
               probs.append("summary: revised not a bool (%r)" % s.get("revised"))
           tri = s.get("triage")
@@ -1327,9 +1333,10 @@ judges:
       Checks: a report exists; it carries the declared top-level keys; it has a
       results row for the case's strat_id; that row's status is in the declared
       enum; score equals the review's score; and status agrees with the review
-      (passed <=> pass: true, failed <=> pass: false, error <=> review error
-      set). A run that legitimately fails its final review is a documented valid
-      outcome, so `failed` is accepted — only *disagreement* with the artifacts
+      (passed requires pass: true, score >= 10 and recommendation: accept;
+      failed is a valid quality rejection; missing/invalid review metadata or
+      an explicit review error yields error). A run that legitimately fails its
+      final review is a documented valid outcome, so `failed` is accepted — only *disagreement* with the artifacts
       is a failure. When more than one report is present the newest is evaluated
       and the count is reported (a second report means the pipeline was
       re-initialized mid-run, which is pipeline_protocol's business).
@@ -1407,7 +1414,7 @@ judges:
                           and p.endswith(strat + "-decomposition.md")), None)
           s = fm(summary) if summary is not None else {}
           review = next((c for p, c in sorted(files.items())
-                         if "epic-reviews/" in p
+                         if "epic-reviews/" in p and "/history/" not in p
                          and p.endswith(strat + "-decomp-review.md")), None)
           r = fm(review) if review is not None else {}
           status = row.get("status")
@@ -1430,9 +1437,22 @@ judges:
               if "score" in row and row.get("score") != r.get("score"):
                   probs.append("report score=%s but review score=%s"
                                % (row.get("score"), r.get("score")))
-              if r.get("error"):
+              review_keys = {"strat_id", "score", "pass", "recommendation",
+                             "issues", "error"}
+              valid = (bool(r) and not (set(r) - review_keys)
+                       and r.get("strat_id") == strat
+                       and type(r.get("score")) is int
+                       and 0 <= r["score"] <= 14
+                       and isinstance(r.get("pass"), bool)
+                       and r.get("recommendation") in ("accept", "revise")
+                       and (r.get("issues") is None
+                            or isinstance(r.get("issues"), list))
+                       and (r.get("error") is None
+                            or isinstance(r.get("error"), str)))
+              if not valid or r.get("error"):
                   want = "error"
-              elif r.get("pass") is True:
+              elif (r.get("pass") is True and r["score"] >= 10
+                    and r.get("recommendation") == "accept"):
                   want = "passed"
               else:
                   want = "failed"
@@ -1501,7 +1521,7 @@ judges:
       if not strat:
           return (False, "annotations.yaml missing strat_id")
       path = next((p for p in sorted(files)
-                   if "epic-reviews/" in p
+                   if "epic-reviews/" in p and "/history/" not in p
                    and p.endswith(strat + "-decomp-review.md")), None)
       if path is None:
           # A8: artifact_contract already fails a missing review file; billing it

@@ -167,15 +167,13 @@ def _check_review_passed(artifacts_dir, strat_id):
     """
     review_path = os.path.join(artifacts_dir, "epic-reviews",
                                f"{strat_id}-decomp-review.md")
-    if not os.path.exists(review_path):
-        return False, None
-    try:
-        data, _ = read_frontmatter_validated(review_path, "decomp-review")
-        return data.get("pass", False), data
-    except ValidationError as e:
-        print(f"  WARNING: Cannot read review for {strat_id}: {e}",
+    from review_utils import load_review
+    status, data = load_review(review_path)
+    if status == "error":
+        print(f"  WARNING: Cannot read review for {strat_id}: {data['error']}",
               file=sys.stderr)
         return False, None
+    return status == "passed", data
 
 
 def _find_submittable_strats(artifacts_dir):

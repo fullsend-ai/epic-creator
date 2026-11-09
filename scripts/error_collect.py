@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from artifact_utils import read_frontmatter
+from review_utils import load_review
 
 
 def main():
@@ -26,10 +26,8 @@ def main():
             error_ids.append(strat_id)
             continue
 
-        if os.path.exists(review):
-            data, _ = read_frontmatter(review)
-            if data and data.get("error"):
-                error_ids.append(strat_id)
+        if load_review(review)[0] == "error":
+            error_ids.append(strat_id)
 
     if error_ids:
         os.makedirs("tmp", exist_ok=True)

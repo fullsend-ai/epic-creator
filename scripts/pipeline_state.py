@@ -87,7 +87,7 @@ PHASE_CONFIG = {
     "REVISE_DECOMP": {
         "type": "agent",
         "prompt": "skills/epic-decompose/prompts/revise-agent.md",
-        "ids_file": "tmp/pipeline-active-ids.txt",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise_decomp",
         "vars": {"ID": "{ID}"},
     },
@@ -160,17 +160,20 @@ def _copy_ids(src, dst):
     shutil.copy2(src, dst)
 
 
-def _reset_revised_flag(decomp_path):
-    """Remove ``revised`` key from decomposition frontmatter.
+def _reset_revised_flag(decomp_path, field="revised"):
+    """Remove a completion sentinel from decomposition frontmatter.
 
-    The revise_decomp completion poller treats *any* non-None value
+    By default, reset ``revised``. The completion poller treats any non-None value
     (including False) as "completed".  Removing the key forces it back to
     "pending" so the revise agent is actually launched.
     """
     from artifact_utils import read_frontmatter
-    data, body = read_frontmatter(decomp_path)
-    if data and "revised" in data:
-        del data["revised"]
+    try:
+        data, body = read_frontmatter(decomp_path)
+    except (OSError, ValueError, yaml.YAMLError):
+        return  # An unreadable summary is already pending in the poller.
+    if isinstance(data, dict) and field in data:
+        del data[field]
         with open(decomp_path, "w") as f:
             f.write("---\n")
             f.write(yaml.dump(data, default_flow_style=False, sort_keys=False))
@@ -212,14 +215,26 @@ def advance(state, dry_run=False):
     Returns (next_phase, summary_line).
     """
     phase = state["phase"]
+    from review_utils import archive_review, load_review
 
     # --- BATCH_START: reset counters, populate active IDs ---
     if phase == "BATCH_START":
         batch = state.get("batch", 0) + 1
         if not dry_run:
             state["batch"] = batch
+            state["revise_cycle"] = 0
+            _write_ids("tmp/pipeline-revise-ids.txt", [])
             batch_file = f"tmp/pipeline-batch-{batch}-ids.txt"
             _copy_ids(batch_file, "tmp/pipeline-active-ids.txt")
+            if state.get("retry_cycle", 0):
+                # The error batch must not reuse the previous attempt's
+                # completed review or decomposition sentinels.
+                for strat_id in _read_ids("tmp/pipeline-active-ids.txt"):
+                    archive_review(strat_id)
+                    decomp = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
+                    if os.path.exists(decomp):
+                        for field in ("revised", "decompose_complete"):
+                            _reset_revised_flag(decomp, field)
         return "FETCH", f"BATCH_START → FETCH: batch={batch}"
 
     # --- Linear main sequence ---
@@ -229,53 +244,60 @@ def advance(state, dry_run=False):
             _compute_ai_scores("tmp/pipeline-active-ids.txt")
         return nxt, f"{phase} → {nxt}"
 
-    # --- REVIEW_DECOMP → REVISE_DECOMP (unconditional first revision) ---
+    # --- REVIEW_DECOMP → REVISE_DECOMP (first quality revision) ---
     if phase == "REVIEW_DECOMP":
+        revise_ids = []
+        for strat_id in _read_ids("tmp/pipeline-active-ids.txt"):
+            review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
+            if load_review(review_path)[0] != "error":
+                revise_ids.append(strat_id)
+        if not revise_ids:
+            return "BATCH_DONE", "REVIEW_DECOMP → BATCH_DONE: reviews need error retry"
         if not dry_run:
+            _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             # Clear the ``revised`` default so the poller sees IDs as pending.
             # The schema sets revised: false on creation, but the poller
             # treats any non-None value as "completed".
-            for strat_id in _read_ids("tmp/pipeline-active-ids.txt"):
+            for strat_id in revise_ids:
                 decomp = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
                 if os.path.exists(decomp):
                     _reset_revised_flag(decomp)
-        return "REVISE_DECOMP", "REVIEW_DECOMP → REVISE_DECOMP: first revision (unconditional)"
+        return "REVISE_DECOMP", "REVIEW_DECOMP → REVISE_DECOMP: first quality revision"
 
     # --- REVISE_DECOMP → RE_REVIEW_CHECK ---
     if phase == "REVISE_DECOMP":
         if not dry_run:
-            _compute_ai_scores("tmp/pipeline-active-ids.txt")
+            _compute_ai_scores("tmp/pipeline-revise-ids.txt")
         return "RE_REVIEW_CHECK", "REVISE_DECOMP → RE_REVIEW_CHECK"
 
-    # --- RE_REVIEW_CHECK: did revision change anything? ---
+    # --- RE_REVIEW_CHECK: changed artifacts or unresolved quality failure? ---
     if phase == "RE_REVIEW_CHECK":
         from artifact_utils import read_frontmatter
-        cycle = state.get("revise_cycle", 0)
-        if cycle == 0:
-            check_ids = _read_ids("tmp/pipeline-active-ids.txt")
-        else:
-            check_ids = _read_ids("tmp/pipeline-revise-ids.txt")
+        check_ids = _read_ids("tmp/pipeline-revise-ids.txt")
         revised_ids = []
+        changed = {}
         for strat_id in check_ids:
+            status, _ = load_review(f"artifacts/epic-reviews/{strat_id}-decomp-review.md")
+            if status == "error":
+                continue  # BATCH_DONE/ERROR_COLLECT owns technical retries.
             decomp_path = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
             if os.path.exists(decomp_path):
                 try:
                     data, _ = read_frontmatter(decomp_path)
-                    if data and data.get("revised"):
+                    if data and (data.get("revised") or status == "failed"):
                         revised_ids.append(strat_id)
+                        changed[strat_id] = data.get("revised") is True
                 except Exception:
                     pass
         if not revised_ids:
-            return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: revision made no changes"
+            return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: no quality re-review needed"
         if not dry_run:
             _write_ids("tmp/pipeline-revise-ids.txt", revised_ids)
-            # Delete old review files so the poller can detect fresh reviews
+            # Preserve evidence while requiring a fresh canonical review.
             for strat_id in revised_ids:
-                review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
-                if os.path.exists(review_path):
-                    os.remove(review_path)
+                archive_review(strat_id, revision_changed=changed[strat_id])
         return ("RE_REVIEW",
-                f"RE_REVIEW_CHECK → RE_REVIEW: {len(revised_ids)} revised")
+                f"RE_REVIEW_CHECK → RE_REVIEW: {len(revised_ids)} to review")
 
     # --- RE_REVIEW → REVISE_CHECK ---
     if phase == "RE_REVIEW":
@@ -283,18 +305,12 @@ def advance(state, dry_run=False):
 
     # --- REVISE_CHECK: only revise again if review fails, with cycle cap ---
     if phase == "REVISE_CHECK":
-        from artifact_utils import read_frontmatter
         revise_ids = _read_ids("tmp/pipeline-revise-ids.txt")
         failing_ids = []
         for strat_id in revise_ids:
             review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
-            if os.path.exists(review_path):
-                try:
-                    data, _ = read_frontmatter(review_path)
-                    if data and not data.get("pass", True):
-                        failing_ids.append(strat_id)
-                except Exception:
-                    pass
+            if load_review(review_path)[0] == "failed":
+                failing_ids.append(strat_id)
         cycle = state.get("revise_cycle", 0)
         if failing_ids and cycle < 2:
             if not dry_run:
@@ -334,14 +350,8 @@ def advance(state, dry_run=False):
             error_ids = []
             for strat_id in all_ids:
                 review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
-                if os.path.exists(review_path):
-                    try:
-                        from artifact_utils import read_frontmatter
-                        data, _ = read_frontmatter(review_path)
-                        if data and data.get("error"):
-                            error_ids.append(strat_id)
-                    except Exception:
-                        pass
+                if load_review(review_path)[0] == "error":
+                    error_ids.append(strat_id)
                 decomp_path = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
                 if not os.path.exists(decomp_path):
                     error_ids.append(strat_id)

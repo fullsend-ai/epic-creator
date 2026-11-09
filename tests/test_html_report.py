@@ -88,6 +88,16 @@ def tmp_dir(tmp_path):
     os.chdir(orig)
 
 
+def test_malformed_review_renders_as_error(tmp_dir):
+    from generate_html_report import render_strategy_section
+    _setup_strategy()
+    _write("artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md",
+           "---\nscore: [broken\n---\n")
+    _, _, stats = render_strategy_section("RHAISTRAT-9999")
+    assert stats["error"] is True
+    assert stats["passed"] is False
+
+
 class TestHTMLReportGeneration:
     """Basic HTML report generation tests."""
 

@@ -211,7 +211,8 @@ def render_strategy_section(strat_id):
 
     decomp_fm, _ = read_frontmatter(decomp_path)
     decomp_body = read_body(decomp_path) if os.path.exists(decomp_path) else ""
-    review_fm, _ = read_frontmatter(review_path)
+    from review_utils import load_review
+    review_status, review_fm = load_review(review_path)
 
     # Collect epic files — includes BRANCH files for conditional decompositions
     epic_files = sorted(
@@ -227,7 +228,7 @@ def render_strategy_section(strat_id):
 
     mermaid = extract_mermaid(decomp_body)
     score = review_fm.get("score", "?")
-    passed = review_fm.get("pass", False)
+    passed = review_status == "passed"
     error = review_fm.get("error")
     issues = review_fm.get("issues") or []
     triage = decomp_fm.get("triage")

@@ -10,6 +10,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
+from review_utils import load_review, unchanged_review_recoveries
 
 
 def main():
@@ -43,17 +44,17 @@ def main():
             entry["epic_count"] = data.get("epic_count", 0)
             entry["status"] = "decomposed"
 
-        if os.path.exists(review):
-            data, _ = read_frontmatter(review)
-            if data.get("error"):
-                entry["status"] = "error"
+        if os.path.exists(decomp) or os.path.exists(review):
+            status, data = load_review(review)
+            entry["status"] = status
+            if status == "error":
                 entry["error"] = data["error"]
-            elif data.get("pass"):
-                entry["status"] = "passed"
-                entry["score"] = data.get("score")
             else:
-                entry["status"] = "failed"
                 entry["score"] = data.get("score")
+
+        # A passing retry is a recovery event, not proof of a false negative.
+        entry["review_recoveries_without_edits"] = (
+            unchanged_review_recoveries(strat_id))
 
         results.append(entry)
 
@@ -63,6 +64,10 @@ def main():
         "batch_size": opts.batch_size,
         "total": len(ids),
         "results": results,
+        "recovered_without_edits": [
+            entry["strat_id"] for entry in results
+            if entry["review_recoveries_without_edits"] > 0
+        ],
     }
 
     os.makedirs("artifacts/decompose-runs", exist_ok=True)

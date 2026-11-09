@@ -14,9 +14,12 @@ Output: artifacts/epic-reviews/{ID}-decomp-review.md
 
 1. Read the strategy file
 2. Read the decomposition summary
-3. Read all epic files matching `artifacts/epic-tasks/{ID}-E*.md` (excluding `-ai-signals.md` files)
-4. Read all AI signal rationale files matching `artifacts/epic-tasks/{ID}-E*-ai-signals.md`
-5. Read all conditional branch files matching `artifacts/epic-tasks/{ID}-BRANCH-*-E*.md` — the `{ID}-E*.md` glob in step 3 does **not** match these, so read them separately when the decomposition uses conditional branches.
+3. Run the deterministic file inventory before grading: `python3 scripts/check_review_files.py {ID}`.
+4. Read every listed `epic_file` and each `rationale_file` marked `rationale_readable=true`.
+
+Use the inventory's JSON `epics` entries and `errors` to establish which exact epic and rationale paths exist and are readable. The `epic_readable` and `rationale_readable` flags describe their respective files. It includes main-plan and conditional branch files and searches independently of `.gitignore`. A nonzero exit with an inventory means files need attention; continue the review and record those findings. If the command fails without producing an inventory, write a review with `strat_id="{ID}"`, `score=0`, `pass=false`, `recommendation=revise`, and `error="artifact inventory check failed"`, then stop so the pipeline can retry the technical error.
+
+Use the exact paths from the inventory rather than treating an empty search-tool result as proof that a file is missing. If a later read disagrees with the inventory, rerun the checker and record the observed error. File existence alone does not establish that the rationale or decomposition is correct.
 
 If the decomposition summary does not exist, create the review file with an error and stop:
 
@@ -82,7 +85,7 @@ Each epic type uses its own signal set: **Implementation** epics carry `ai_signa
 - **1**: Most signals are correct but 1-2 have arguable values (e.g., a borderline `existing_foundation` for a partially-greenfield Implementation epic, or a borderline `source_accessibility` for an Investigation), or signal rationales are present but thin.
 - **0**: Signal values contradict the rubric conditions (e.g. Implementation `open_questions: 1` despite unresolved questions; or an Investigation marking `source_accessibility: 1` when the answer is a pending human decision), or the type-appropriate signal field is missing from frontmatter, or the ai-signals file is missing.
 
-Check: For each epic, read `artifacts/epic-tasks/{ID}-ENNN-ai-signals.md` and verify the signal values in frontmatter (`ai_signals` for Implementation, `investigation_signals` for Investigation) against that rubric's conditions and the strategy content. Cross-check that the signal rationales match the frontmatter values. Do **not** check arithmetic or thresholds — `ai_implementability` and `ai_implementability_score` are computed by the pipeline, not the decompose agent.
+Check: For each main-plan and conditional branch epic, read its `rationale_file` from the inventory and verify the signal values in frontmatter (`ai_signals` for Implementation, `investigation_signals` for Investigation) against that rubric's conditions and the strategy content. Cross-check that the signal rationales match the frontmatter values. A missing or unreadable rationale file reported by the checker scores this criterion 0; name its exact path and error in the finding. Do **not** check arithmetic or thresholds — `ai_implementability` and `ai_implementability_score` are computed by the pipeline, not the decompose agent.
 
 ### Criterion 6: Acceptance Criteria Quality (0-2 points)
 
