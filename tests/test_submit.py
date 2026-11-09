@@ -984,6 +984,30 @@ class TestResumeAndAbort:
         assert id_map == {}
         mock_create.assert_not_called()
 
+    def test_resume_accepts_jira_key_persisted_after_manifest(
+            self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+        _run_fm("set", plan[0]["path"], "jira_key=RHAI-9002")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        rebuilt_manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md")
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+
+        existing_manifest, existing_ledger = submit_module._load_existing_submission(
+            "artifacts", "RHAISTRAT-9999", rebuilt_manifest)
+
+        assert existing_manifest["run_id"] == manifest["run_id"]
+        assert existing_ledger.has_succeeded(operation_id)
+
     def test_resume_skips_completed_label(self, tmp_dir):
         _setup_strategy(epic_count=1)
         plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
@@ -1021,8 +1045,8 @@ class TestResumeAndAbort:
         plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
         manifest, ledger = self._manifest_and_ledger(plan)
         submission_manifest.write_manifest(
-            submit_module._manifest_path("artifacts", "RHAISTRAT-9999"),
-            manifest)
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
         operation_id = "create:RHAISTRAT-9999-E001"
         ledger.begin(operation_id, "create_epic",
                      "RHAISTRAT-9999-E001", before={"jira_key": None})
@@ -1047,7 +1071,39 @@ class TestResumeAndAbort:
                 submit_module.main()
 
         assert failure.value.code == 1
-        assert "Cannot resume RHAISTRAT-9999" in capsys.readouterr().err
+        assert "No submission manifest found for RHAISTRAT-9999." in \
+            capsys.readouterr().err
+
+    def test_resume_loads_ledger_under_strategy_lock(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+        events = []
+
+        class StrategyLock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        def load_existing(*args, **kwargs):
+            events.append("load")
+            return manifest, ledger
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "--resume", "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")), \
+             patch("submit.submission_lock", return_value=StrategyLock()), \
+             patch("submit._load_existing_submission",
+                   side_effect=load_existing), \
+             patch("submit._submit_strategy", return_value=(0, 0)):
+            submit_module.main()
+
+        assert events == ["lock", "load"]
 
     def _assert_no_writes(self, boundaries):
         for mutation in boundaries[0].values():
@@ -1104,6 +1160,22 @@ class TestLedgerFailureInjection:
         assert entry["status"] == "failed"
         assert entry["error"] == "jira unavailable"
 
+    def test_ambiguous_epic_create_is_not_retried_automatically(
+            self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.failure(operation_id, RuntimeError("response lost"))
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert id_map == {}
+        mock_create.assert_not_called()
+
     def test_failed_dependency_link_is_recorded(self, tmp_dir):
         plan, ledger = self._plan(epic_count=2)
         operation_id = "link:RHAI-9001:RHAI-9002"
@@ -1137,6 +1209,42 @@ class TestLedgerFailureInjection:
         entry = ledger.entry(operation_id)
         assert entry["status"] == "failed"
         assert entry["error"] == "upload failed"
+
+    def test_attachment_lookup_failure_is_recorded(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "attach_frontmatter:RHAI-9002"
+        id_map = {"RHAISTRAT-9999-E001": "RHAI-9002"}
+
+        with patch("submit._get_existing_attachments",
+                   side_effect=RuntimeError("attachment lookup failed")):
+            errors = _attach_frontmatter(
+                "s", "u", "t", plan, id_map, ledger=ledger)
+
+        assert errors == 1
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "attachment lookup failed"
+
+    def test_changed_branch_content_blocks_all_jira_writes(self, tmp_dir):
+        plan, _ = self._plan()
+        _setup_branch_epics()
+        branches = _scan_branch_epics("artifacts", "RHAISTRAT-9999")
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md",
+            branches=branches)
+        branch_path = branches[("A", "RHAISTRAT-9999-E001")][0][0]
+        with open(branch_path, "a") as branch:
+            branch.write("Unapproved change.\n")
+
+        with patch("submit.verify_jira_auth") as mock_auth:
+            result = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False,
+                artifacts_dir="artifacts",
+                branch_plans=manifest["branch_plans"])
+
+        assert result == (0, 1)
+        mock_auth.assert_not_called()
 
     def test_failed_branch_attachment_is_recorded(self, tmp_dir):
         plan, ledger = self._plan()

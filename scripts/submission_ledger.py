@@ -9,6 +9,7 @@ import fcntl
 import json
 import os
 import re
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -24,16 +25,25 @@ class SubmissionLockError(RuntimeError):
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _atomic_write_json(path, data):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    temporary_path = f"{path}.tmp"
-    with open(temporary_path, "w") as target:
-        json.dump(data, target, indent=2, sort_keys=True)
-        target.write("\n")
-    os.replace(temporary_path, path)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f"{os.path.basename(path)}.", suffix=".tmp",
+        dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(descriptor, "w") as target:
+            json.dump(data, target, indent=2, sort_keys=True)
+            target.write("\n")
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def ledger_path(artifacts_dir, run_id):
@@ -145,10 +155,10 @@ class SubmissionLedger:
 
 
 @contextmanager
-def submission_lock(run_id, lock_dir="tmp/submission-locks"):
-    """Acquire an exclusive, nonblocking lock for one submission run."""
-    safe_run_id = re.sub(r"[^A-Za-z0-9_.-]", "_", run_id)
-    path = os.path.join(lock_dir, f"{safe_run_id}.lock")
+def submission_lock(target_id, lock_dir="tmp/submission-locks"):
+    """Acquire an exclusive, nonblocking lock for one submission target."""
+    safe_target_id = re.sub(r"[^A-Za-z0-9_.-]", "_", target_id)
+    path = os.path.join(lock_dir, f"{safe_target_id}.lock")
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
@@ -156,7 +166,7 @@ def submission_lock(run_id, lock_dir="tmp/submission-locks"):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise SubmissionLockError(
-                f"Submission run {run_id!r} is already in progress.") from error
+                f"Submission target {target_id!r} is already in progress.") from error
         try:
             yield
         finally:

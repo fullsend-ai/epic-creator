@@ -9,12 +9,17 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 
 import yaml
+from artifact_utils import read_frontmatter
 
 SCHEMA_VERSION = 1
 STRATEGY_ID_PATTERN = re.compile(r"^RHAISTRAT-\d+$")
 EPIC_ID_PATTERN = re.compile(r"^RHAISTRAT-\d+-E\d+$")
+BRANCH_EPIC_ID_PATTERN = re.compile(
+    r"^RHAISTRAT-\d+-BRANCH-[A-Z]-E\d+$")
+BRANCH_PATTERN = re.compile(r"^[A-Z]$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 PRIORITIES = {"Critical", "Major", "Minor"}
 
@@ -29,6 +34,19 @@ def _sha256_file(path):
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def approved_source_digest(path):
+    try:
+        data, body = read_frontmatter(path)
+    except yaml.YAMLError as error:
+        raise SubmissionManifestError(
+            f"Cannot read frontmatter from {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise SubmissionManifestError(f"Cannot read frontmatter from {path}.")
+    data.pop("jira_key", None)
+    payload = {"frontmatter": data, "body": body}
+    return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
 
 
 def _canonical_json(value):
@@ -50,7 +68,7 @@ def _derive_run_id(manifest):
     return f"{manifest['strategy_id']}-{digest[:12]}"
 
 
-def build_manifest(strategy_id, plan, review_data, review_path):
+def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
     """Build a submission manifest from an approved decomposition plan."""
     if not isinstance(strategy_id, str) or not STRATEGY_ID_PATTERN.fullmatch(strategy_id):
         raise SubmissionManifestError(f"Invalid strategy ID: {strategy_id!r}")
@@ -98,8 +116,39 @@ def build_manifest(strategy_id, plan, review_data, review_path):
             "labels": list(labels),
             "dependencies": list(dependencies),
             "source_path": source_path,
-            "source_sha256": _sha256_file(source_path),
+            "source_sha256": approved_source_digest(source_path),
         })
+
+    branch_plans = []
+    if branches is None:
+        branches = {}
+    if not isinstance(branches, dict):
+        raise SubmissionManifestError("Branch plans must be a mapping.")
+    for (branch, gating_epic_id), branch_epics in sorted(branches.items()):
+        if not isinstance(branch, str) or not BRANCH_PATTERN.fullmatch(branch):
+            raise SubmissionManifestError(f"Invalid branch identifier: {branch!r}.")
+        if not isinstance(gating_epic_id, str):
+            raise SubmissionManifestError(
+                f"Branch {branch} requires a gating epic ID.")
+        if not isinstance(branch_epics, list) or not branch_epics:
+            raise SubmissionManifestError(f"Branch {branch} has no epics.")
+        for path, data, _body in branch_epics:
+            epic_id = data.get("epic_id") if isinstance(data, dict) else None
+            if not isinstance(epic_id, str) or not BRANCH_EPIC_ID_PATTERN.fullmatch(epic_id):
+                raise SubmissionManifestError(f"Invalid branch epic ID: {epic_id!r}.")
+            if data.get("branch") != branch or data.get("gated_by") != gating_epic_id:
+                raise SubmissionManifestError(
+                    f"Branch metadata mismatch for {epic_id}.")
+            if not isinstance(path, str) or not os.path.isfile(path):
+                raise SubmissionManifestError(
+                    f"Branch epic {epic_id} source artifact not found.")
+            branch_plans.append({
+                "branch": branch,
+                "gating_epic_id": gating_epic_id,
+                "epic_id": epic_id,
+                "source_path": path,
+                "source_sha256": approved_source_digest(path),
+            })
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -111,6 +160,7 @@ def build_manifest(strategy_id, plan, review_data, review_path):
             "review_sha256": _sha256_file(review_path),
         },
         "epics": epics,
+        "branch_plans": branch_plans,
         "expected_jira": {
             "project": "RHAI",
             "issue_type": "Epic",
@@ -185,6 +235,29 @@ def validate_manifest(manifest):
 
     _validate_acyclic(epics)
 
+    branch_plans = manifest.get("branch_plans", [])
+    if not isinstance(branch_plans, list):
+        raise SubmissionManifestError("Manifest branch plans must be a list.")
+    branch_epic_ids = set()
+    for branch_epic in branch_plans:
+        if not isinstance(branch_epic, dict):
+            raise SubmissionManifestError("Each branch plan must be a mapping.")
+        epic_id = branch_epic.get("epic_id")
+        if not isinstance(epic_id, str) or not BRANCH_EPIC_ID_PATTERN.fullmatch(epic_id):
+            raise SubmissionManifestError(f"Invalid branch epic ID: {epic_id!r}.")
+        if epic_id in branch_epic_ids:
+            raise SubmissionManifestError(f"Duplicate branch epic ID: {epic_id}.")
+        branch_epic_ids.add(epic_id)
+        if not isinstance(branch_epic.get("branch"), str) or not BRANCH_PATTERN.fullmatch(branch_epic["branch"]):
+            raise SubmissionManifestError(f"Branch epic {epic_id} has an invalid branch.")
+        if branch_epic.get("gating_epic_id") not in epic_ids:
+            raise SubmissionManifestError(
+                f"Branch epic {epic_id} has an unknown gating epic.")
+        if not isinstance(branch_epic.get("source_path"), str) or not branch_epic["source_path"]:
+            raise SubmissionManifestError(f"Branch epic {epic_id} requires a source path.")
+        if not isinstance(branch_epic.get("source_sha256"), str) or not SHA256_PATTERN.fullmatch(branch_epic["source_sha256"]):
+            raise SubmissionManifestError(f"Branch epic {epic_id} has an invalid source hash.")
+
     expected_jira = manifest.get("expected_jira")
     if not isinstance(expected_jira, dict):
         raise SubmissionManifestError("Manifest requires expected Jira fields.")
@@ -225,14 +298,32 @@ def write_manifest(path, manifest):
     """Persist a validated manifest atomically."""
     validate_manifest(manifest)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    temporary_path = f"{path}.tmp"
-    with open(temporary_path, "w") as target:
-        yaml.safe_dump(manifest, target, sort_keys=False, allow_unicode=True)
-    os.replace(temporary_path, path)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f"{os.path.basename(path)}.", suffix=".tmp",
+        dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(descriptor, "w") as target:
+            yaml.safe_dump(manifest, target, sort_keys=False, allow_unicode=True)
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def read_manifest(path):
     """Load and validate a manifest from disk."""
     with open(path) as source:
-        manifest = yaml.safe_load(source)
+        try:
+            manifest = yaml.safe_load(source)
+        except yaml.YAMLError as error:
+            raise SubmissionManifestError(
+                f"Cannot read submission manifest {path}: {error}") from error
     return validate_manifest(manifest)
+
+
+def manifest_path(artifacts_dir, strategy_id):
+    return os.path.join(artifacts_dir, "submission-manifests",
+                        f"{strategy_id}.yaml")
