@@ -405,6 +405,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
                 components=components,
                 parent_key=strat_id,
                 assignee_id=assignee_id,
+                retry_transient=False,
             )
             if ledger:
                 ledger.success(operation_id,
@@ -658,6 +659,15 @@ def _validate_branch_plans(branches, branch_plans):
         raise SubmissionManifestError("; ".join(details) or "branch plans differ")
 
 
+def _has_completed_ledger_create(plan, ledger):
+    if ledger is None:
+        return False
+    return any(
+        ledger.has_succeeded(f"create:{entry['epic_id']}")
+        for entry in plan
+    )
+
+
 def _replace_attachment(server, user, token, jira_key, filename, content,
                         existing):
     """Upload an attachment, replacing any prior version.
@@ -761,7 +771,8 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         verify_jira_auth(server, user, token)
         # A fresh breakdown must still be eligible at the actual write boundary.
         # Recorded keys identify partial submissions that this script can resume.
-        if not any(entry["jira_key"] for entry in plan):
+        if (not any(entry["jira_key"] for entry in plan)
+                and not _has_completed_ledger_create(plan, ledger)):
             strategy = get_issue(server, user, token, strat_id,
                                  fields=["issuelinks"])
             if not isinstance(strategy, dict) or strategy.get("key") != strat_id:
@@ -844,6 +855,22 @@ def _load_existing_submission(artifacts_dir, strat_id, manifest):
         ledger_file, existing_manifest["run_id"],
         manifest_digest(existing_manifest))
     return existing_manifest, ledger
+
+
+def _build_current_manifest(strat_id, plan, review_data, review_path,
+                            artifacts_dir):
+    return build_manifest(
+        strat_id, plan, review_data, review_path,
+        _scan_branch_epics(artifacts_dir, strat_id))
+
+
+def _run_submission(server, user, token, strat_id, plan, dry_run,
+                    artifacts_dir, manifest, ledger):
+    _print_plan(plan, strat_id, dry_run)
+    return _submit_strategy(
+        server, user, token, strat_id, plan, dry_run,
+        artifacts_dir=artifacts_dir, ledger=ledger,
+        branch_plans=manifest.get("branch_plans", []))
 
 
 def main():
@@ -931,21 +958,9 @@ def main():
         review_path = os.path.join(args.artifacts_dir, "epic-reviews",
                                    f"{strat_id}-decomp-review.md")
 
-        def build_current_manifest():
-            return build_manifest(
-                strat_id, plan, review_data, review_path,
-                _scan_branch_epics(args.artifacts_dir, strat_id))
-
-        def run_submission(manifest, ledger):
-            _print_plan(plan, strat_id, args.dry_run)
-            created, errors = _submit_strategy(
-                server, user, token, strat_id, plan, args.dry_run,
-                artifacts_dir=args.artifacts_dir, ledger=ledger,
-                branch_plans=manifest.get("branch_plans", []))
-            return created, errors
-
         try:
-            manifest = build_current_manifest()
+            manifest = _build_current_manifest(
+                strat_id, plan, review_data, review_path, args.artifacts_dir)
         except SubmissionManifestError as error:
             print(f"  ERROR: Submission manifest invalid for {strat_id}: "
                   f"{error}", file=sys.stderr)
@@ -976,11 +991,15 @@ def main():
 
         try:
             with submission_lock(strat_id):
-                manifest = build_current_manifest()
+                manifest = _build_current_manifest(
+                    strat_id, plan, review_data, review_path,
+                    args.artifacts_dir)
                 if args.resume:
                     manifest, ledger = _load_existing_submission(
                         args.artifacts_dir, strat_id, manifest)
-                    created, errors = run_submission(manifest, ledger)
+                    created, errors = _run_submission(
+                        server, user, token, strat_id, plan, args.dry_run,
+                        args.artifacts_dir, manifest, ledger)
                 else:
                     digest = manifest_digest(manifest)
                     write_manifest(manifest_path(args.artifacts_dir, strat_id),
@@ -988,7 +1007,9 @@ def main():
                     ledger = SubmissionLedger(
                         ledger_path(args.artifacts_dir, manifest["run_id"]),
                         manifest["run_id"], digest)
-                    created, errors = run_submission(manifest, ledger)
+                    created, errors = _run_submission(
+                        server, user, token, strat_id, plan, args.dry_run,
+                        args.artifacts_dir, manifest, ledger)
                 total_created += created
                 total_errors += errors
         except (SubmissionManifestError, SubmissionLedgerError,

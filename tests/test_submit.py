@@ -1008,6 +1008,27 @@ class TestResumeAndAbort:
         assert existing_manifest["run_id"] == manifest["run_id"]
         assert existing_ledger.has_succeeded(operation_id)
 
+    def test_submit_strategy_restores_ledger_key_before_preflight(
+            self, tmp_dir, submission_boundaries):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+
+        with patch("submit.verify_jira_auth"):
+            created, errors = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False,
+                artifacts_dir="artifacts", ledger=ledger,
+                branch_plans=manifest.get("branch_plans", []))
+
+        assert (created, errors) == (1, 0)
+        submission_boundaries[0]["create_issue"].assert_not_called()
+        data, _ = read_frontmatter(plan[0]["path"])
+        assert data["jira_key"] == "RHAI-9002"
+
     def test_resume_skips_completed_label(self, tmp_dir):
         _setup_strategy(epic_count=1)
         plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)

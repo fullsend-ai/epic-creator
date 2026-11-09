@@ -16,8 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from jira_utils import (JiraReadError, has_existing_epics, search_issues_page,
-                        verify_jira_auth)
+from jira_utils import (JiraReadError, create_issue, has_existing_epics,
+                        search_issues_page, verify_jira_auth)
 
 
 SERVER = "https://jira.example.com"
@@ -60,6 +60,18 @@ class TestVerifyJiraAuth:
         assert sent.get_header("Authorization") == f"Basic {AUTH}"
         assert sent.get_header("Accept") == "application/json"
         assert sent.get_method() == "GET"
+
+
+class TestCreateIssue:
+    def test_protected_create_uses_single_http_attempt(self):
+        with patch("jira_utils.api_call", return_value={"key": CHILD}) as once, \
+             patch("jira_utils.api_call_with_retry") as retrying:
+            assert create_issue(
+                SERVER, USER, TOKEN, "RHAI", "Epic", "Protected create",
+                {}, "Major", retry_transient=False) == CHILD
+
+        once.assert_called_once()
+        retrying.assert_not_called()
 
     @pytest.mark.parametrize("identity", [
         None, [], {},
