@@ -18,8 +18,10 @@ from submit import (
     _build_branch_plan_md,
     _build_description,
     _build_plan,
+    _create_dependency_links,
     _create_epics,
     _get_strat_assignee,
+    _label_strategy,
     _scan_branch_epics,
     _scan_epics,
     _check_review_passed,
@@ -30,6 +32,8 @@ from submit import (
 )
 from artifact_utils import read_frontmatter
 import submit as submit_module
+import submission_ledger
+import submission_manifest
 
 PYTHON = sys.executable
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
@@ -825,7 +829,7 @@ class TestSubmissionSafety:
         _setup_strategy(epic_count=2)
         _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
                 "jira_key=RHAI-9002")
-        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
         with patch("jira_utils.api_call_with_retry", return_value={
             "accountId": "test-account", "active": True,
         }) as reads, patch("submit.has_existing_epics") as child_check:
@@ -908,6 +912,263 @@ class TestSubmissionSafety:
         assert "No Jira writes were made for RHAISTRAT-9999 in this attempt." in output.err
         assert "No Jira writes were made for RHAISTRAT-9998" not in output.err
         assert "HTTP 401" in output.err
+
+
+class TestResumeAndAbort:
+    def _manifest_and_ledger(self, plan, review_data=None):
+        review_path = "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md"
+        review_data = review_data or {"pass": True, "score": 12}
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, review_data, review_path)
+        digest = submission_manifest.manifest_digest(manifest)
+        ledger = submission_ledger.SubmissionLedger(
+            submission_ledger.ledger_path("artifacts", manifest["run_id"]),
+            manifest["run_id"], digest)
+        return manifest, ledger
+
+    def test_resume_skips_completed_create_and_restores_jira_key(
+            self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = submit_module._create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 0
+        assert id_map["RHAISTRAT-9999-E001"] == "RHAI-9002"
+        mock_create.assert_not_called()
+        data, _ = read_frontmatter(plan[0]["path"])
+        assert data["jira_key"] == "RHAI-9002"
+
+    def test_resume_skips_completed_link(self, tmp_dir):
+        _setup_strategy(epic_count=2)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "link:RHAI-9002:RHAI-9003"
+        ledger.begin(operation_id, "create_issue_link", "RHAI-9002->RHAI-9003")
+        ledger.success(operation_id, after={"exists": True})
+        id_map = {
+            "RHAISTRAT-9999-E001": "RHAI-9002",
+            "RHAISTRAT-9999-E002": "RHAI-9003",
+        }
+
+        with patch("submit.create_issue_link") as mock_link:
+            errors = submit_module._create_dependency_links(
+                "s", "u", "t", plan, id_map, ledger=ledger)
+
+        assert errors == 0
+        mock_link.assert_not_called()
+
+    def test_resume_rejects_conflicting_jira_key(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+        _run_fm("set", plan[0]["path"], "jira_key=RHAI-9999")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert id_map == {}
+        mock_create.assert_not_called()
+
+    def test_resume_skips_completed_label(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "label:RHAISTRAT-9999"
+        ledger.begin(operation_id, "label_strategy", "RHAISTRAT-9999")
+        ledger.success(operation_id, after={"labels": ["done"]})
+
+        with patch("submit.add_labels") as mock_label:
+            result = submit_module._label_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", ledger=ledger)
+
+        assert result is True
+        mock_label.assert_not_called()
+
+    def test_resume_skips_completed_frontmatter_attachment(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "attach_frontmatter:RHAI-9002"
+        ledger.begin(operation_id, "attach_frontmatter", "RHAI-9002")
+        ledger.success(operation_id, after={"filename": "RHAI-9002.yaml"})
+        id_map = {"RHAISTRAT-9999-E001": "RHAI-9002"}
+
+        with patch("submit._replace_attachment") as mock_attach:
+            errors = submit_module._attach_frontmatter(
+                "s", "u", "t", plan, id_map, ledger=ledger)
+
+        assert errors == 0
+        mock_attach.assert_not_called()
+
+    def test_abort_reports_ledger_without_writes(
+            self, tmp_dir, submission_boundaries, capsys):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submit_module._manifest_path("artifacts", "RHAISTRAT-9999"),
+            manifest)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "--abort", "RHAISTRAT-9999"]):
+            submit_module.main()
+
+        output = capsys.readouterr()
+        assert "Abort requested" in output.out
+        assert "No Jira writes were made" in output.out
+        self._assert_no_writes(submission_boundaries)
+
+    def test_resume_requires_existing_manifest_and_ledger(
+            self, tmp_dir, capsys):
+        _setup_strategy(epic_count=1)
+        with patch.object(sys, "argv",
+                          [SCRIPT, "--resume", "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")):
+            with pytest.raises(SystemExit) as failure:
+                submit_module.main()
+
+        assert failure.value.code == 1
+        assert "Cannot resume RHAISTRAT-9999" in capsys.readouterr().err
+
+    def _assert_no_writes(self, boundaries):
+        for mutation in boundaries[0].values():
+            mutation.assert_not_called()
+
+
+class TestLedgerFailureInjection:
+    def _plan(self, epic_count=1):
+        _setup_strategy(epic_count=epic_count)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        review_path = "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md"
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12}, review_path)
+        ledger = submission_ledger.SubmissionLedger(
+            submission_ledger.ledger_path(
+                "artifacts", manifest["run_id"]),
+            manifest["run_id"],
+            submission_manifest.manifest_digest(manifest))
+        return plan, ledger
+
+    def test_epic_ledger_is_durable_before_jira_write(
+            self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+        observed_statuses = []
+
+        def create_issue(*args, **kwargs):
+            observed_statuses.append(ledger.entry(operation_id)["status"])
+            return "RHAI-9002"
+
+        with patch("submit.create_issue", side_effect=create_issue), \
+             patch("submit.markdown_to_adf", return_value={}):
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 0
+        assert id_map["RHAISTRAT-9999-E001"] == "RHAI-9002"
+        assert observed_statuses == ["in_progress"]
+        assert ledger.entry(operation_id)["status"] == "succeeded"
+
+    def test_failed_epic_creation_is_recorded(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+
+        with patch("submit.create_issue",
+                   side_effect=RuntimeError("jira unavailable")), \
+             patch("submit.markdown_to_adf", return_value={}):
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert id_map == {}
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "jira unavailable"
+
+    def test_failed_dependency_link_is_recorded(self, tmp_dir):
+        plan, ledger = self._plan(epic_count=2)
+        operation_id = "link:RHAI-9001:RHAI-9002"
+        id_map = {
+            "RHAISTRAT-9999-E001": "RHAI-9001",
+            "RHAISTRAT-9999-E002": "RHAI-9002",
+        }
+
+        with patch("submit.create_issue_link",
+                   side_effect=RuntimeError("link failed")):
+            errors = _create_dependency_links(
+                "s", "u", "t", plan, id_map, ledger=ledger)
+
+        assert errors == 1
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "link failed"
+
+    def test_failed_frontmatter_attachment_is_recorded(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "attach_frontmatter:RHAI-9002"
+        id_map = {"RHAISTRAT-9999-E001": "RHAI-9002"}
+
+        with patch("submit._replace_attachment",
+                   side_effect=RuntimeError("upload failed")), \
+             patch("submit._get_existing_attachments", return_value={}):
+            errors = _attach_frontmatter(
+                "s", "u", "t", plan, id_map, ledger=ledger)
+
+        assert errors == 1
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "upload failed"
+
+    def test_failed_branch_attachment_is_recorded(self, tmp_dir):
+        plan, ledger = self._plan()
+        _setup_branch_epics()
+        operation_id = "attach_branch:RHAI-9002:A"
+        id_map = {"RHAISTRAT-9999-E001": "RHAI-9002"}
+
+        with patch("submit._replace_attachment",
+                   side_effect=RuntimeError("branch upload failed")), \
+             patch("submit._get_existing_attachments", return_value={}):
+            errors = _attach_branch_plans(
+                "s", "u", "t", "artifacts", "RHAISTRAT-9999", id_map,
+                ledger=ledger)
+
+        assert errors == 2
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "branch upload failed"
+
+    def test_failed_strategy_label_is_recorded(self, tmp_dir):
+        _, ledger = self._plan()
+        operation_id = "label:RHAISTRAT-9999"
+
+        with patch("submit.add_labels",
+                   side_effect=RuntimeError("label failed")):
+            result = _label_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", ledger=ledger)
+
+        assert result is False
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "label failed"
 
 
 class TestDryRun:
