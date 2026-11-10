@@ -11,7 +11,7 @@ topics:
 # ADR-0002: Assign one target repository to each implementation epic
 
 Date: 2026-10-22
-Updated: 2026-11-06
+Updated: 2026-11-10
 
 ## Status
 
@@ -82,10 +82,14 @@ mapping rules belong in workload data.
 
 Keep the structured canonical target in the reviewed plan and Epic Markdown.
 For each resolved implementation Epic, include its canonical HTTPS repository
-URL in the initial Jira create request under the existing `URL` field,
-`customfield_10933`.
+URL in the initial Jira create request under a workload-configured existing Jira
+URL field. RHAI uses `customfield_10933` (display name `URL`); other Jira projects
+configure their own field ID rather than relying on a shared display name.
 
-Select the field by ID from RHAI Epic create metadata and verify its URL type
+The current RHAI publisher hardcodes this ID. Workload-level field selection
+remains an implementation requirement before supporting other Jira projects.
+
+Select the configured field by ID from the project's Epic create metadata and verify its URL type
 before any Jira writes. The field must be available on the Epic create screen.
 Do not create a new repository field or use repository labels as the target
 contract. Preserve unrelated workflow and classification labels.
@@ -103,21 +107,41 @@ stop processing.
 
 ### Human approval before coding
 
-The current workflow requires a human to approve each Epic before coding starts.
-Repository assignment and publication do not replace that approval. The reviewer
-must confirm the target repository and resolve any missing-repository warning
-before approving implementation.
+Require a human to approve each Epic before coding starts. Repository assignment,
+strategy-level human sign-off and automated decomposition review do not establish
+Epic approval. The current publisher does not record or enforce a distinct
+per-Epic approval artifact.
 
-### Preserve the reviewed assignment through publication and recovery
+Before coding is enabled, the consumer contract must define a durable approval
+record identifying the Epic, approving human and approved scope and repository.
+The consumer must block dispatch when that record is absent or no longer matches
+the current Epic. The human must confirm the target repository and resolve any
+missing-repository warning before approval. This ADR establishes the requirement;
+consumer enforcement remains separate work.
 
-Bind the plan to its strategy inputs, workload policy, inventory revision and
-source commits/content digests. Drafting and review use that same evidence.
-Changed bound inputs require replanning and review before publication.
+### Preserve existing submission retry behavior
 
-Recovery must verify the stored URL and published scope against the reviewed
-plan. A missing or conflicting URL on a resolved Epic requires explicit
-reconciliation; the publisher must not silently overwrite it or create a
-duplicate issue. Automatic migration of existing issues is outside this decision.
+Preserve existing submission retry behavior and avoid duplicate warning comments.
+
+### URL validation shared by publisher and consumer
+
+Represent a resolved target as `https://<host>/<namespace>/<repository>`, derived
+from the reviewed approved-inventory entry. Preserve the canonical inventory
+spelling and namespace path. Omit a trailing slash and `.git` suffix; credentials,
+ports, query strings, fragments and repository subpaths are not part of the URL.
+Do not infer a contribution destination from a redirect or a product mapping.
+
+The publisher validates the selected identity against the bound inventory and
+source evidence before creation. An unresolved or Investigation Epic omits the
+field; an empty value never authorizes dispatch. Malformed or conflicting values
+require explicit reconciliation rather than normalization into a guessed target.
+
+Before dispatch, the consumer must validate the URL against the approved inventory
+and the reviewed assignment, and verify the matching human approval. An unknown
+or no-longer-approved entry blocks dispatch pending reconciliation and, when bound
+inputs change, replanning and review. A syntactically valid URL alone is
+insufficient. These consumer checks remain to be implemented in the separate
+consumer contract.
 
 ## Consequences
 
@@ -133,8 +157,5 @@ duplicate issue. Automatic migration of existing issues is outside this decision
 
 ## References
 
-- [AISDLC-90 — Target repository assignment](https://redhat.atlassian.net/browse/AISDLC-90)
-- [AISDLC-547 — Epic Creator implementation](https://redhat.atlassian.net/browse/AISDLC-547)
-- [AISDLC-548 — Consumer contract](https://redhat.atlassian.net/browse/AISDLC-548)
-- [RHAI source configuration](https://github.com/amastbau/epic-creator/blob/jira/AISDLC-547-repo-url-field/config/rhai-repositories.yaml)
-- [Imported component/repository mapping](https://github.com/amastbau/epic-creator/blob/jira/AISDLC-547-repo-url-field/config/rhai/repository-mapping.md)
+- [Architecture Context](https://github.com/opendatahub-io/architecture-context/)
+- [Epic Creator repository planning and publication proposal](https://github.com/fullsend-ai/epic-creator/pull/56)
