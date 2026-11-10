@@ -64,8 +64,10 @@ from jira_utils import (
 from submission_manifest import (
     SubmissionManifestError,
     approved_source_digest,
+    approved_source_digest_from_snapshot,
     approved_source_snapshot,
     build_manifest,
+    manifest_content_digest,
     manifest_path,
     manifest_digest,
     read_manifest,
@@ -271,6 +273,7 @@ def _build_plan(epics, valid_components):
             "path": path,
             "body": body,
             "jira_key": jira_key,
+            "source_sha256": approved_source_digest_from_snapshot(data, body),
         })
 
     return plan
@@ -361,9 +364,10 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
                                        "epic-task")
                 except Exception as error:
                     print(f"  ERROR: Cannot restore {recorded_key} to "
-                          f"{entry['path']}: {error}", file=sys.stderr)
+                          f"{entry['path']}: "
+                          f"{safe_error_message(error)}", file=sys.stderr)
                     errors += 1
-                    continue
+                    break
             id_to_jira_key[epic_id] = recorded_key
             print(f"  SKIP {recorded_key} <- {epic_id} (ledger)")
             continue
@@ -449,6 +453,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
 def _resolve_jira_keys(plan, ledger):
     effective_keys = {}
     conflicts = []
+    keys_by_epic = {}
     for entry in plan:
         epic_id = entry["epic_id"]
         artifact_key = entry.get("jira_key")
@@ -465,7 +470,15 @@ def _resolve_jira_keys(plan, ledger):
             conflicts.append(
                 f"{epic_id}: artifact={artifact_key}, ledger={ledger_key}")
             continue
-        effective_keys[epic_id] = artifact_key or ledger_key
+        effective_key = artifact_key or ledger_key
+        if effective_key:
+            if effective_key in keys_by_epic:
+                conflicts.append(
+                    f"{keys_by_epic[effective_key]} and {epic_id} both use "
+                    f"{effective_key}")
+            else:
+                keys_by_epic[effective_key] = epic_id
+        effective_keys[epic_id] = effective_key
     return effective_keys, conflicts
 
 
@@ -602,6 +615,7 @@ def _scan_branch_epics(artifacts_dir, strat_id):
     for path in paths:
         try:
             data, body = read_frontmatter_validated(path, "epic-task")
+            source_sha256 = approved_source_digest_from_snapshot(data, body)
         except ValidationError as e:
             print(f"  WARNING: Skipping {path}: {e}", file=sys.stderr)
             continue
@@ -612,7 +626,8 @@ def _scan_branch_epics(artifacts_dir, strat_id):
                   f"gated_by field", file=sys.stderr)
             continue
         key = (branch, gated_by)
-        branches.setdefault(key, []).append((path, data, body))
+        branches.setdefault(key, []).append(
+            (path, data, body, source_sha256))
     return branches
 
 
@@ -623,7 +638,8 @@ def _build_branch_plan_md(branch_epics):
     separated by a horizontal rule.
     """
     sections = []
-    for path, data, body in branch_epics:
+    for branch_epic in branch_epics:
+        _path, data, body = branch_epic[:3]
         yaml_str = yaml.dump(
             data, default_flow_style=False, sort_keys=False,
             allow_unicode=True)
@@ -632,13 +648,15 @@ def _build_branch_plan_md(branch_epics):
 
 
 def _attach_branch_plans(server, user, token, artifacts_dir, strat_id,
-                         id_to_jira_key, ledger=None, branch_plans=None):
+                         id_to_jira_key, ledger=None, branch_plans=None,
+                         branches=None):
     """Attach conditional branch plans to their gating Investigation epics.
 
     Each branch becomes a single markdown file attached to the Investigation
     epic that gates it.  Returns error count.
     """
-    branches = _scan_branch_epics(artifacts_dir, strat_id)
+    if branches is None:
+        branches = _scan_branch_epics(artifacts_dir, strat_id)
     if branch_plans is not None:
         try:
             _validate_branch_plans(branches, branch_plans)
@@ -689,18 +707,23 @@ def _attach_branch_plans(server, user, token, artifacts_dir, strat_id,
 def _validate_branch_plans(branches, branch_plans):
     actual = {}
     for (branch, gating_epic_id), branch_epics in branches.items():
-        for path, data, _body in branch_epics:
+        for branch_epic in branch_epics:
+            path, data, _body = branch_epic[:3]
+            source_sha256 = (branch_epic[3]
+                             if len(branch_epic) > 3
+                             else approved_source_digest(path))
             actual[data["epic_id"]] = {
                 "branch": branch,
                 "gating_epic_id": gating_epic_id,
                 "source_path": path,
-                "source_sha256": approved_source_digest(path),
+                "source_sha256": source_sha256,
+                "existing_jira_key": data.get("jira_key"),
             }
     expected = {
         entry["epic_id"]: {
             key: entry[key]
             for key in ("branch", "gating_epic_id", "source_path",
-                        "source_sha256")
+                        "source_sha256", "existing_jira_key")
         }
         for entry in branch_plans
     }
@@ -820,10 +843,11 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
         return len(pending), 0
 
+    branches = None
     if branch_plans is not None:
+        branches = _scan_branch_epics(artifacts_dir, strat_id)
         try:
-            _validate_branch_plans(
-                _scan_branch_epics(artifacts_dir, strat_id), branch_plans)
+            _validate_branch_plans(branches, branch_plans)
         except SubmissionManifestError as error:
             print(f"  ERROR: Branch plans do not match the manifest: "
                   f"{error}", file=sys.stderr)
@@ -903,7 +927,7 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     print("  Phase 4: Attaching branch plans...")
     errors += _attach_branch_plans(
         server, user, token, artifacts_dir, strat_id, id_to_jira_key,
-        ledger=ledger, branch_plans=branch_plans)
+            ledger=ledger, branch_plans=branch_plans, branches=branches)
 
     # Phase 5: Label source strategy (only when ALL epics are created)
     all_created = len(id_to_jira_key) == len(plan)
@@ -925,10 +949,6 @@ def _load_existing_submission(artifacts_dir, strat_id, manifest):
         raise SubmissionManifestError(
             f"No submission manifest found for {strat_id}.")
     existing_manifest = read_manifest(manifest_file)
-    if manifest_digest(existing_manifest) != manifest_digest(manifest):
-        raise SubmissionManifestError(
-            f"Submission manifest for {strat_id} has changed since the run "
-            "was created.")
     ledger_file = ledger_path(artifacts_dir, existing_manifest["run_id"])
     if not os.path.exists(ledger_file):
         raise SubmissionLedgerError(
@@ -936,6 +956,36 @@ def _load_existing_submission(artifacts_dir, strat_id, manifest):
     ledger = SubmissionLedger(
         ledger_file, existing_manifest["run_id"],
         manifest_digest(existing_manifest))
+    comparison_manifest = dict(manifest)
+    comparison_epics = []
+    comparison_existing_manifest = dict(existing_manifest)
+    comparison_existing_epics = []
+    existing_epics = {
+        epic["epic_id"]: epic for epic in existing_manifest.get("epics", [])
+    }
+    for epic in manifest.get("epics", []):
+        comparison_epic = dict(epic)
+        existing_epic = existing_epics.get(epic["epic_id"], {})
+        operation_id = f"create:{epic['epic_id']}"
+        ledger_key = None
+        if ledger.has_succeeded(operation_id):
+            ledger_entry = ledger.entry(operation_id) or {}
+            ledger_key = (ledger_entry.get("after") or {}).get("jira_key")
+        existing_comparison = existing_epic
+        if existing_epic.get("existing_jira_key") is None and ledger_key:
+            comparison_epic["existing_jira_key"] = ledger_key
+            if existing_epic:
+                existing_comparison = dict(existing_epic)
+                existing_comparison["existing_jira_key"] = ledger_key
+        comparison_epics.append(comparison_epic)
+        comparison_existing_epics.append(existing_comparison)
+    comparison_manifest["epics"] = comparison_epics
+    comparison_existing_manifest["epics"] = comparison_existing_epics
+    if (manifest_content_digest(comparison_existing_manifest)
+            != manifest_content_digest(comparison_manifest)):
+        raise SubmissionManifestError(
+            f"Submission manifest for {strat_id} has changed since the run "
+            "was created.")
     return existing_manifest, ledger
 
 
@@ -1077,7 +1127,9 @@ def main():
             continue
 
         try:
-            with submission_lock(strat_id):
+            with submission_lock(
+                    strat_id,
+                    os.path.join(args.artifacts_dir, "submission-locks")):
                 passed, review_data = _check_review_passed(
                     args.artifacts_dir, strat_id)
                 if not passed:

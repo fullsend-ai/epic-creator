@@ -69,6 +69,18 @@ def test_jira_key_does_not_change_approved_content_digest(context):
     assert first["run_id"] == second["run_id"]
 
 
+def test_existing_jira_mapping_changes_manifest_identity(context):
+    context["plan"][0]["jira_key"] = "RHAI-100"
+    first = _build(context)
+    context["plan"][0]["jira_key"] = "RHAI-200"
+    second = _build(context)
+    assert first["epics"][0]["source_sha256"] == \
+        second["epics"][0]["source_sha256"]
+    assert first["epics"][0]["existing_jira_key"] == "RHAI-100"
+    assert second["epics"][0]["existing_jira_key"] == "RHAI-200"
+    assert first["run_id"] != second["run_id"]
+
+
 def test_branch_plan_content_is_part_of_manifest(context, tmp_path):
     branch_path = tmp_path / "RHAISTRAT-1001-BRANCH-A-E003.md"
     branch_path.write_text(

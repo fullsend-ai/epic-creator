@@ -21,6 +21,7 @@ BRANCH_EPIC_ID_PATTERN = re.compile(
     r"^RHAISTRAT-\d+-BRANCH-[A-Z]-E\d+$")
 BRANCH_PATTERN = re.compile(r"^[A-Z]$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+JIRA_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
 PRIORITIES = {"Critical", "Major", "Minor"}
 
 
@@ -44,16 +45,24 @@ def approved_source_snapshot(path):
             f"Cannot read frontmatter from {path}: {error}") from error
     if not isinstance(data, dict):
         raise SubmissionManifestError(f"Cannot read frontmatter from {path}.")
-    apply_defaults(data, "epic-task")
-    approved_data = dict(data)
-    approved_data.pop("jira_key", None)
-    payload = {"frontmatter": approved_data, "body": body}
-    digest = hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+    digest = approved_source_digest_from_snapshot(data, body)
     return data, body, digest
 
 
 def approved_source_digest(path):
     return approved_source_snapshot(path)[2]
+
+
+def approved_source_digest_from_snapshot(data, body):
+    """Hash the exact frontmatter/body pair already read by the caller."""
+    if not isinstance(data, dict):
+        raise SubmissionManifestError("Frontmatter snapshot must be a mapping.")
+    normalized_data = dict(data)
+    apply_defaults(normalized_data, "epic-task")
+    approved_data = dict(normalized_data)
+    approved_data.pop("jira_key", None)
+    payload = {"frontmatter": approved_data, "body": body}
+    return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
 
 
 def _canonical_json(value):
@@ -67,6 +76,14 @@ def _manifest_digest(manifest):
 def manifest_digest(manifest):
     """Return a stable digest for a validated manifest."""
     return _manifest_digest(validate_manifest(manifest))
+
+
+def manifest_content_digest(manifest):
+    """Return a run-ID-independent digest for a validated manifest."""
+    payload = dict(manifest)
+    payload.pop("run_id", None)
+    payload["run_id"] = _derive_run_id(payload)
+    return _manifest_digest(validate_manifest(payload))
 
 
 def _derive_run_id(manifest):
@@ -97,6 +114,8 @@ def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
         labels = entry.get("labels", [])
         dependencies = entry.get("dependencies", [])
         source_path = entry.get("path")
+        source_sha256 = entry.get("source_sha256")
+        existing_jira_key = entry.get("jira_key")
 
         if not isinstance(epic_id, str) or not EPIC_ID_PATTERN.fullmatch(epic_id):
             raise SubmissionManifestError(f"Invalid epic ID: {epic_id!r}")
@@ -114,7 +133,11 @@ def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
             raise SubmissionManifestError(f"Epic {epic_id} requires a source artifact path.")
         if not os.path.isfile(source_path):
             raise SubmissionManifestError(f"Epic {epic_id} source artifact not found: {source_path}")
-
+        if source_sha256 is None:
+            source_sha256 = approved_source_digest(source_path)
+        elif (not isinstance(source_sha256, str)
+              or not SHA256_PATTERN.fullmatch(source_sha256)):
+            raise SubmissionManifestError(f"Epic {epic_id} has an invalid source hash.")
         epics.append({
             "epic_id": epic_id,
             "title": title,
@@ -123,7 +146,8 @@ def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
             "labels": list(labels),
             "dependencies": list(dependencies),
             "source_path": source_path,
-            "source_sha256": approved_source_digest(source_path),
+            "source_sha256": source_sha256,
+            "existing_jira_key": existing_jira_key,
         })
 
     branch_plans = []
@@ -139,7 +163,10 @@ def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
                 f"Branch {branch} requires a gating epic ID.")
         if not isinstance(branch_epics, list) or not branch_epics:
             raise SubmissionManifestError(f"Branch {branch} has no epics.")
-        for path, data, _body in branch_epics:
+        for branch_epic in branch_epics:
+            path, data, _body = branch_epic[:3]
+            source_sha256 = (branch_epic[3]
+                             if len(branch_epic) > 3 else None)
             epic_id = data.get("epic_id") if isinstance(data, dict) else None
             if not isinstance(epic_id, str) or not BRANCH_EPIC_ID_PATTERN.fullmatch(epic_id):
                 raise SubmissionManifestError(f"Invalid branch epic ID: {epic_id!r}.")
@@ -149,12 +176,19 @@ def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
             if not isinstance(path, str) or not os.path.isfile(path):
                 raise SubmissionManifestError(
                     f"Branch epic {epic_id} source artifact not found.")
+            if source_sha256 is None:
+                source_sha256 = approved_source_digest(path)
+            elif (not isinstance(source_sha256, str)
+                  or not SHA256_PATTERN.fullmatch(source_sha256)):
+                raise SubmissionManifestError(
+                    f"Branch epic {epic_id} has an invalid source hash.")
             branch_plans.append({
                 "branch": branch,
                 "gating_epic_id": gating_epic_id,
                 "epic_id": epic_id,
                 "source_path": path,
-                "source_sha256": approved_source_digest(path),
+                "source_sha256": source_sha256,
+                "existing_jira_key": data.get("jira_key"),
             })
 
     manifest = {
@@ -233,6 +267,12 @@ def validate_manifest(manifest):
 
     for epic in epics:
         dependencies = epic.get("dependencies")
+        existing_jira_key = epic.get("existing_jira_key")
+        if existing_jira_key is not None and (
+                not isinstance(existing_jira_key, str)
+                or not JIRA_KEY_PATTERN.fullmatch(existing_jira_key)):
+            raise SubmissionManifestError(
+                f"Epic {epic_id} has an invalid existing Jira key.")
         if not isinstance(dependencies, list):
             raise SubmissionManifestError(f"Epic {epic['epic_id']} has invalid dependencies.")
         for dependency in dependencies:
@@ -264,6 +304,12 @@ def validate_manifest(manifest):
             raise SubmissionManifestError(f"Branch epic {epic_id} requires a source path.")
         if not isinstance(branch_epic.get("source_sha256"), str) or not SHA256_PATTERN.fullmatch(branch_epic["source_sha256"]):
             raise SubmissionManifestError(f"Branch epic {epic_id} has an invalid source hash.")
+        existing_jira_key = branch_epic.get("existing_jira_key")
+        if existing_jira_key is not None and (
+                not isinstance(existing_jira_key, str)
+                or not JIRA_KEY_PATTERN.fullmatch(existing_jira_key)):
+            raise SubmissionManifestError(
+                f"Branch epic {epic_id} has an invalid existing Jira key.")
 
     expected_jira = manifest.get("expected_jira")
     if not isinstance(expected_jira, dict):

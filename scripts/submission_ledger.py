@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 LEDGER_SCHEMA_VERSION = 1
+LEDGER_STATUSES = {"in_progress", "succeeded", "failed"}
 
 
 class SubmissionLedgerError(RuntimeError):
@@ -37,7 +38,15 @@ def _atomic_write_json(path, data):
         with os.fdopen(descriptor, "w") as target:
             json.dump(data, target, indent=2, sort_keys=True)
             target.write("\n")
+            target.flush()
+            os.fsync(target.fileno())
         os.replace(temporary_path, path)
+        directory_fd = os.open(
+            os.path.dirname(path) or ".", os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     except Exception:
         try:
             os.unlink(temporary_path)
@@ -88,6 +97,35 @@ class SubmissionLedger:
         entries = payload.get("entries")
         if not isinstance(entries, dict):
             raise SubmissionLedgerError("Submission ledger entries must be an object.")
+        for operation_id, entry in entries.items():
+            if not isinstance(operation_id, str) or not operation_id:
+                raise SubmissionLedgerError(
+                    "Submission ledger operation IDs must be non-empty strings.")
+            if not isinstance(entry, dict):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} must be an object.")
+            if not isinstance(entry.get("operation"), str) or not entry.get("operation"):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has an invalid operation.")
+            if not isinstance(entry.get("target"), (str, dict)):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has an invalid target.")
+            if entry.get("status") not in LEDGER_STATUSES:
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has an invalid status.")
+            attempts = entry.get("attempts")
+            if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has invalid attempts.")
+            if entry.get("before") is not None and not isinstance(entry.get("before"), dict):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has invalid before state.")
+            if entry.get("after") is not None and not isinstance(entry.get("after"), dict):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has invalid after state.")
+            if entry.get("error") is not None and not isinstance(entry.get("error"), str):
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has an invalid error.")
         self.entries = entries
 
     def _save(self):

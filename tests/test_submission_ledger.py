@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -60,3 +61,15 @@ def test_lock_is_exclusive(tmp_path):
             "RHAISTRAT-1001-run", tmp_path / "locks"), \
          pytest.raises(submission_ledger.SubmissionLockError):
         try_lock()
+
+
+def test_rejects_malformed_ledger_entry(ledger, tmp_path):
+    ledger.begin("create:E001", "create_epic",
+                 "RHAISTRAT-1001-E001", before={"jira_key": None})
+    payload = json.loads((tmp_path / "ledger.json").read_text())
+    payload["entries"]["create:E001"]["attempts"] = "two"
+    (tmp_path / "ledger.json").write_text(json.dumps(payload))
+
+    with pytest.raises(submission_ledger.SubmissionLedgerError):
+        submission_ledger.SubmissionLedger(
+            tmp_path / "ledger.json", "RHAISTRAT-1001-run", "digest")

@@ -1120,7 +1120,11 @@ class TestResumeAndAbort:
                       "---\n"
                       "## Description\n\nEpic 1 for testing.\n")
         plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
-        manifest, _ = self._manifest_and_ledger(plan)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
         submission_manifest.write_manifest(
             submission_manifest.manifest_path(
                 "artifacts", "RHAISTRAT-9999"), manifest)
@@ -1610,3 +1614,62 @@ class TestDryRun:
         assert "RHAI-100" in result.stdout
         # Only E002 is pending
         assert "1 epics created" in result.stdout
+
+
+class TestProtectedSubmissionRecovery:
+    def test_rejects_two_epics_using_the_same_jira_key(self, tmp_dir):
+        _setup_strategy(epic_count=2)
+        plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        for entry in plan:
+            entry["jira_key"] = "RHAI-100"
+
+        effective_keys, conflicts = submit_module._resolve_jira_keys(
+            plan, None)
+
+        assert effective_keys["RHAISTRAT-9999-E001"] == "RHAI-100"
+        assert effective_keys["RHAISTRAT-9999-E002"] == "RHAI-100"
+        assert any("both use RHAI-100" in conflict for conflict in conflicts)
+
+    def test_failed_key_restoration_stops_later_epic_creation(self, tmp_dir):
+        _setup_strategy(epic_count=2)
+        plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md")
+        digest = submission_manifest.manifest_digest(manifest)
+        ledger = submission_ledger.SubmissionLedger(
+            submission_ledger.ledger_path("artifacts", manifest["run_id"]),
+            manifest["run_id"], digest)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+
+        with patch("submit.update_frontmatter",
+                   side_effect=OSError("disk unavailable")), \
+             patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert "RHAISTRAT-9999-E001" not in id_map
+        assert "RHAISTRAT-9999-E002" not in id_map
+        mock_create.assert_not_called()
+
+    def test_branch_validation_uses_the_scanned_snapshot(self, tmp_dir):
+        _setup_strategy()
+        _setup_branch_epics()
+        branches = _scan_branch_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md",
+            branches=branches)
+
+        with patch("submit.approved_source_digest",
+                   side_effect=AssertionError("snapshot was reread")):
+            submit_module._validate_branch_plans(
+                branches, manifest["branch_plans"])
