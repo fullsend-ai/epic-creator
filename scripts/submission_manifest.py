@@ -12,7 +12,7 @@ import re
 import tempfile
 
 import yaml
-from artifact_utils import read_frontmatter
+from artifact_utils import apply_defaults, read_frontmatter
 
 SCHEMA_VERSION = 1
 STRATEGY_ID_PATTERN = re.compile(r"^RHAISTRAT-\d+$")
@@ -44,6 +44,7 @@ def approved_source_snapshot(path):
             f"Cannot read frontmatter from {path}: {error}") from error
     if not isinstance(data, dict):
         raise SubmissionManifestError(f"Cannot read frontmatter from {path}.")
+    apply_defaults(data, "epic-task")
     approved_data = dict(data)
     approved_data.pop("jira_key", None)
     payload = {"frontmatter": approved_data, "body": body}

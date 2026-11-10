@@ -1051,6 +1051,36 @@ class TestResumeAndAbort:
         assert result == (0, 1)
         self._assert_no_writes(submission_boundaries)
 
+    def test_ledger_recovered_jira_target_is_verified_before_writes(
+            self, tmp_dir, submission_boundaries):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+        submission_boundaries[1].return_value = {
+            "key": "RHAI-9002",
+            "fields": {
+                "project": {"key": "RHAI"},
+                "issuetype": {"name": "Epic"},
+                "parent": {"key": "RHAISTRAT-9998"},
+            },
+        }
+
+        with patch("submit.verify_jira_auth"):
+            result = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False,
+                artifacts_dir="artifacts", ledger=ledger,
+                branch_plans=[])
+
+        assert result == (0, 1)
+        submission_boundaries[1].assert_called_once_with(
+            "s", "u", "t", "RHAI-9002",
+            fields=["project", "issuetype", "parent"])
+        self._assert_no_writes(submission_boundaries)
+
     def test_resume_accepts_jira_key_persisted_after_manifest(
             self, tmp_dir):
         _setup_strategy(epic_count=1)
@@ -1075,6 +1105,37 @@ class TestResumeAndAbort:
         assert existing_manifest["run_id"] == manifest["run_id"]
         assert existing_ledger.has_succeeded(operation_id)
 
+    def test_manifest_hash_applies_frontmatter_defaults(
+            self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        path = "artifacts/epic-tasks/RHAISTRAT-9999-E001.md"
+        _write(path, "---\n"
+                      "epic_id: RHAISTRAT-9999-E001\n"
+                      "title: Test Epic 1\n"
+                      "parent_strat: RHAISTRAT-9999\n"
+                      "component: test-component\n"
+                      "team: Test Team\n"
+                      "type: Implementation\n"
+                      "priority: P1\n"
+                      "---\n"
+                      "## Description\n\nEpic 1 for testing.\n")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, _ = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+        _run_fm("set", path, "jira_key=RHAI-9002")
+
+        updated_plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        updated_manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", updated_plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md")
+        existing_manifest, _ = submit_module._load_existing_submission(
+            "artifacts", "RHAISTRAT-9999", updated_manifest)
+
+        assert existing_manifest["run_id"] == manifest["run_id"]
+
     def test_submit_strategy_restores_ledger_key_before_preflight(
             self, tmp_dir, submission_boundaries):
         _setup_strategy(epic_count=1)
@@ -1084,6 +1145,14 @@ class TestResumeAndAbort:
         ledger.begin(operation_id, "create_epic",
                      "RHAISTRAT-9999-E001", before={"jira_key": None})
         ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+        submission_boundaries[1].return_value = {
+            "key": "RHAI-9002",
+            "fields": {
+                "project": {"key": "RHAI"},
+                "issuetype": {"name": "Epic"},
+                "parent": {"key": "RHAISTRAT-9999"},
+            },
+        }
 
         with patch("submit.verify_jira_auth"):
             created, errors = submit_module._submit_strategy(
@@ -1276,6 +1345,26 @@ class TestResumeAndAbort:
     def test_submission_errors_are_sanitized(self):
         message = "bad path\n::error::injected\x1b[31mred\x1b[0m"
         assert sanitize_log_message(message) == "bad path |error|injectedred"
+
+    def test_abort_errors_are_sanitized(self, tmp_dir, capsys):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, _ = self._manifest_and_ledger(plan)
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "--abort", "RHAISTRAT-9999"]), \
+             patch("submit._build_current_manifest", return_value=manifest), \
+             patch("submit._load_existing_submission",
+                   side_effect=submission_manifest.SubmissionManifestError(
+                       "bad manifest\n::error::injected")), \
+             pytest.raises(SystemExit) as failure:
+            submit_module.main()
+
+        assert failure.value.code == 1
+
+        output = capsys.readouterr()
+        assert "bad manifest |error|injected" in output.err
+        assert "::error::" not in output.err
 
     def _assert_no_writes(self, boundaries):
         for mutation in boundaries[0].values():

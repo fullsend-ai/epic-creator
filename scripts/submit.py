@@ -446,26 +446,32 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
     return id_to_jira_key, errors
 
 
-def _ledger_key_conflicts(plan, ledger):
+def _resolve_jira_keys(plan, ledger):
+    effective_keys = {}
     conflicts = []
-    if not ledger:
-        return conflicts
     for entry in plan:
-        operation_id = f"create:{entry['epic_id']}"
-        if not ledger.has_succeeded(operation_id):
-            continue
-        recorded_entry = ledger.entry(operation_id) or {}
-        recorded_key = (recorded_entry.get("after") or {}).get("jira_key")
-        if entry["jira_key"] and entry["jira_key"] != recorded_key:
+        epic_id = entry["epic_id"]
+        artifact_key = entry.get("jira_key")
+        ledger_key = None
+        if ledger:
+            operation_id = f"create:{epic_id}"
+            if ledger.has_succeeded(operation_id):
+                recorded_entry = ledger.entry(operation_id) or {}
+                ledger_key = (recorded_entry.get("after") or {}).get("jira_key")
+                if not isinstance(ledger_key, str) or not ledger_key:
+                    conflicts.append(f"{epic_id}: ledger has no Jira key")
+                    continue
+        if artifact_key and ledger_key and artifact_key != ledger_key:
             conflicts.append(
-                f"{entry['epic_id']}: artifact={entry['jira_key']}, "
-                f"ledger={recorded_key}")
-    return conflicts
+                f"{epic_id}: artifact={artifact_key}, ledger={ledger_key}")
+            continue
+        effective_keys[epic_id] = artifact_key or ledger_key
+    return effective_keys, conflicts
 
 
-def _validate_reused_jira_targets(server, user, token, plan, strat_id):
-    for entry in plan:
-        jira_key = entry.get("jira_key")
+def _validate_reused_jira_targets(server, user, token, effective_keys,
+                                  strat_id):
+    for epic_id, jira_key in effective_keys.items():
         if not jira_key:
             continue
         try:
@@ -474,7 +480,7 @@ def _validate_reused_jira_targets(server, user, token, plan, strat_id):
                 fields=["project", "issuetype", "parent"])
         except (JiraReadError, OSError, ValueError,
                 http.client.HTTPException) as error:
-            return (f"Cannot verify {jira_key} for {entry['epic_id']}: "
+            return (f"Cannot verify {jira_key} for {epic_id}: "
                     f"{safe_error_message(error)}")
         if not isinstance(issue, dict):
             return f"Jira returned malformed data for {jira_key}"
@@ -491,7 +497,7 @@ def _validate_reused_jira_targets(server, user, token, plan, strat_id):
                 or project_key != TARGET_PROJECT
                 or type_name != TARGET_ISSUE_TYPE
                 or parent_key != strat_id):
-            return (f"Jira key {jira_key} for {entry['epic_id']} is not an "
+            return (f"Jira key {jira_key} for {epic_id} is not an "
                     f"{TARGET_PROJECT} {TARGET_ISSUE_TYPE} under {strat_id}")
     return None
 
@@ -823,7 +829,7 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
                   f"{error}", file=sys.stderr)
             return 0, 1
 
-    key_conflicts = _ledger_key_conflicts(plan, ledger)
+    effective_keys, key_conflicts = _resolve_jira_keys(plan, ledger)
     if key_conflicts:
         print("  ERROR: Artifact Jira keys conflict with the ledger: "
               + "; ".join(key_conflicts), file=sys.stderr)
@@ -860,7 +866,7 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         return 0, 1
 
     target_failure = _validate_reused_jira_targets(
-        server, user, token, plan, strat_id)
+        server, user, token, effective_keys, strat_id)
     if target_failure:
         print(f"  ERROR: {target_failure}", file=sys.stderr)
         print("  No Jira writes were made in this attempt.", file=sys.stderr)
@@ -1043,7 +1049,7 @@ def main():
                 strat_id, plan, review_data, review_path, args.artifacts_dir)
         except SubmissionManifestError as error:
             print(f"  ERROR: Submission manifest invalid for {strat_id}: "
-                  f"{error}", file=sys.stderr)
+                  f"{sanitize_log_message(error)}", file=sys.stderr)
             total_errors += 1
             continue
         if args.abort:
@@ -1051,7 +1057,8 @@ def main():
                 existing_manifest, ledger = _load_existing_submission(
                     args.artifacts_dir, strat_id, manifest)
             except (SubmissionManifestError, SubmissionLedgerError) as error:
-                print(f"  ERROR: Cannot abort {strat_id}: {error}",
+                print(f"  ERROR: Cannot abort {strat_id}: "
+                      f"{sanitize_log_message(error)}",
                       file=sys.stderr)
                 total_errors += 1
                 continue
