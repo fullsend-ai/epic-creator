@@ -31,6 +31,7 @@ from submit import (
     PRIORITY_MAP,
 )
 from artifact_utils import read_frontmatter
+from jira_utils import sanitize_log_message
 import submit as submit_module
 import submission_ledger
 import submission_manifest
@@ -556,6 +557,19 @@ class TestBranchPlans:
         branches = _scan_branch_epics("artifacts", "RHAISTRAT-9999")
         assert branches == {}
 
+    def test_unchanged_branch_plans_validate(self, tmp_dir):
+        _setup_strategy()
+        _setup_branch_epics()
+        branches = _scan_branch_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), set())
+        manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md",
+            branches=branches)
+
+        submit_module._validate_branch_plans(
+            branches, manifest["branch_plans"])
+
     def test_build_branch_plan_md_contains_frontmatter(self, tmp_dir):
         _setup_strategy()
         _setup_branch_epics()
@@ -830,6 +844,14 @@ class TestSubmissionSafety:
         _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
                 "jira_key=RHAI-9002")
         plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        submission_boundaries[1].return_value = {
+            "key": "RHAI-9002",
+            "fields": {
+                "project": {"key": "RHAI"},
+                "issuetype": {"name": "Epic"},
+                "parent": {"key": "RHAISTRAT-9999"},
+            },
+        }
         with patch("jira_utils.api_call_with_retry", return_value={
             "accountId": "test-account", "active": True,
         }) as reads, patch("submit.has_existing_epics") as child_check:
@@ -984,6 +1006,51 @@ class TestResumeAndAbort:
         assert id_map == {}
         mock_create.assert_not_called()
 
+    def test_conflicting_jira_key_blocks_all_submission_writes(
+            self, tmp_dir, submission_boundaries):
+        _setup_strategy(epic_count=2)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _, ledger = self._manifest_and_ledger(plan)
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+        _run_fm("set", plan[0]["path"], "jira_key=RHAI-9999")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+
+        with patch("submit.verify_jira_auth") as mock_auth:
+            result = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False,
+                artifacts_dir="artifacts", ledger=ledger,
+                branch_plans=[])
+
+        assert result == (0, 1)
+        mock_auth.assert_not_called()
+        self._assert_no_writes(submission_boundaries)
+
+    def test_reused_jira_key_target_is_verified_before_writes(
+            self, tmp_dir, submission_boundaries):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        _run_fm("set", plan[0]["path"], "jira_key=RHAI-9002")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        submission_boundaries[1].return_value = {
+            "key": "RHAI-9002",
+            "fields": {
+                "project": {"key": "RHOAIENG"},
+                "issuetype": {"name": "Epic"},
+                "parent": {"key": "RHAISTRAT-9999"},
+            },
+        }
+
+        with patch("submit.verify_jira_auth"):
+            result = submit_module._submit_strategy(
+                "s", "u", "t", "RHAISTRAT-9999", plan, False,
+                artifacts_dir="artifacts", branch_plans=[])
+
+        assert result == (0, 1)
+        self._assert_no_writes(submission_boundaries)
+
     def test_resume_accepts_jira_key_persisted_after_manifest(
             self, tmp_dir):
         _setup_strategy(epic_count=1)
@@ -1060,6 +1127,26 @@ class TestResumeAndAbort:
         assert errors == 0
         mock_attach.assert_not_called()
 
+    def test_changed_frontmatter_blocks_attachment_upload(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, _ = self._manifest_and_ledger(plan)
+        with open(plan[0]["path"], "a") as source:
+            source.write("Unapproved change.\n")
+        source_hashes = {
+            entry["epic_id"]: entry["source_sha256"]
+            for entry in manifest["epics"]
+        }
+        id_map = {"RHAISTRAT-9999-E001": "RHAI-9002"}
+
+        with patch("submit._replace_attachment") as mock_attach:
+            errors = _attach_frontmatter(
+                "s", "u", "t", plan, id_map,
+                source_hashes=source_hashes)
+
+        assert errors == 1
+        mock_attach.assert_not_called()
+
     def test_abort_reports_ledger_without_writes(
             self, tmp_dir, submission_boundaries, capsys):
         _setup_strategy(epic_count=1)
@@ -1125,6 +1212,70 @@ class TestResumeAndAbort:
             submit_module.main()
 
         assert events == ["lock", "load"]
+
+    def test_normal_rerun_reuses_existing_manifest_and_ledger(
+            self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")), \
+             patch("submit._build_current_manifest", return_value=manifest), \
+             patch("submit._load_existing_submission",
+                   return_value=(manifest, ledger)) as mock_load, \
+             patch("submit._run_submission", return_value=(0, 0)) as mock_run, \
+             patch("submit.write_manifest") as mock_write, \
+             patch("submit.submission_lock"):
+            submit_module.main()
+
+        mock_load.assert_called_once()
+        mock_run.assert_called_once()
+        assert mock_run.call_args.args[-2:] == (manifest, ledger)
+        mock_write.assert_not_called()
+
+    def test_submission_inputs_are_reloaded_under_strategy_lock(
+            self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        stale_plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        fresh_plan = list(stale_plan)
+        manifest, ledger = self._manifest_and_ledger(fresh_plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+        events = []
+
+        class StrategyLock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "RHAISTRAT-9999"]), \
+             patch("submit.require_env", return_value=("s", "u", "t")), \
+             patch("submit._build_plan",
+                   side_effect=[stale_plan, fresh_plan]) as mock_build, \
+             patch("submit._build_current_manifest", return_value=manifest), \
+             patch("submit._load_existing_submission",
+                   return_value=(manifest, ledger)), \
+             patch("submit._run_submission", return_value=(0, 0)) as mock_run, \
+             patch("submit.submission_lock", return_value=StrategyLock()):
+            submit_module.main()
+
+        assert events == ["lock"]
+        assert mock_build.call_count == 2
+        assert mock_run.call_args.args[4] is fresh_plan
+
+    def test_submission_errors_are_sanitized(self):
+        message = "bad path\n::error::injected\x1b[31mred\x1b[0m"
+        assert sanitize_log_message(message) == "bad path |error|injectedred"
 
     def _assert_no_writes(self, boundaries):
         for mutation in boundaries[0].values():

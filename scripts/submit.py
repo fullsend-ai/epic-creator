@@ -41,7 +41,6 @@ sys.stdout.reconfigure(line_buffering=True)
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import (
-    read_frontmatter,
     read_frontmatter_validated,
     update_frontmatter,
     ValidationError,
@@ -59,11 +58,13 @@ from jira_utils import (
     add_labels,
     get_issue,
     markdown_to_adf,
+    sanitize_log_message,
     strip_metadata,
 )
 from submission_manifest import (
     SubmissionManifestError,
     approved_source_digest,
+    approved_source_snapshot,
     build_manifest,
     manifest_path,
     manifest_digest,
@@ -445,6 +446,56 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
     return id_to_jira_key, errors
 
 
+def _ledger_key_conflicts(plan, ledger):
+    conflicts = []
+    if not ledger:
+        return conflicts
+    for entry in plan:
+        operation_id = f"create:{entry['epic_id']}"
+        if not ledger.has_succeeded(operation_id):
+            continue
+        recorded_entry = ledger.entry(operation_id) or {}
+        recorded_key = (recorded_entry.get("after") or {}).get("jira_key")
+        if entry["jira_key"] and entry["jira_key"] != recorded_key:
+            conflicts.append(
+                f"{entry['epic_id']}: artifact={entry['jira_key']}, "
+                f"ledger={recorded_key}")
+    return conflicts
+
+
+def _validate_reused_jira_targets(server, user, token, plan, strat_id):
+    for entry in plan:
+        jira_key = entry.get("jira_key")
+        if not jira_key:
+            continue
+        try:
+            issue = get_issue(
+                server, user, token, jira_key,
+                fields=["project", "issuetype", "parent"])
+        except (JiraReadError, OSError, ValueError,
+                http.client.HTTPException) as error:
+            return (f"Cannot verify {jira_key} for {entry['epic_id']}: "
+                    f"{safe_error_message(error)}")
+        if not isinstance(issue, dict):
+            return f"Jira returned malformed data for {jira_key}"
+        fields = issue.get("fields") if isinstance(issue, dict) else None
+        project = fields.get("project") if isinstance(fields, dict) else None
+        issue_type = (fields.get("issuetype")
+                      if isinstance(fields, dict) else None)
+        parent = fields.get("parent") if isinstance(fields, dict) else None
+        project_key = project.get("key") if isinstance(project, dict) else None
+        type_name = (issue_type.get("name")
+                     if isinstance(issue_type, dict) else None)
+        parent_key = parent.get("key") if isinstance(parent, dict) else None
+        if (issue.get("key") != jira_key
+                or project_key != TARGET_PROJECT
+                or type_name != TARGET_ISSUE_TYPE
+                or parent_key != strat_id):
+            return (f"Jira key {jira_key} for {entry['epic_id']} is not an "
+                    f"{TARGET_PROJECT} {TARGET_ISSUE_TYPE} under {strat_id}")
+    return None
+
+
 def _create_dependency_links(server, user, token, plan, id_to_jira_key,
                              ledger=None):
     """Create Blocks links between epics for DAG dependencies.
@@ -640,7 +691,12 @@ def _validate_branch_plans(branches, branch_plans):
                 "source_sha256": approved_source_digest(path),
             }
     expected = {
-        entry["epic_id"]: entry for entry in branch_plans
+        entry["epic_id"]: {
+            key: entry[key]
+            for key in ("branch", "gating_epic_id", "source_path",
+                        "source_sha256")
+        }
+        for entry in branch_plans
     }
     if actual != expected:
         missing = sorted(set(expected) - set(actual))
@@ -684,7 +740,7 @@ def _replace_attachment(server, user, token, jira_key, filename, content,
 
 
 def _attach_frontmatter(server, user, token, plan, id_to_jira_key,
-                        ledger=None):
+                        ledger=None, source_hashes=None):
     """Attach epic frontmatter YAML to each Jira epic.
 
     Preserves structured metadata (gate relationships, AI signals, etc.)
@@ -707,7 +763,12 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key,
             if ledger:
                 ledger.begin(operation_id, "attach_frontmatter",
                              jira_key, before=None)
-            data, _ = read_frontmatter(entry["path"])
+            data, _body, source_digest = approved_source_snapshot(
+                entry["path"])
+            expected_digest = (source_hashes or {}).get(epic_id)
+            if expected_digest is not None and source_digest != expected_digest:
+                raise SubmissionManifestError(
+                    f"Source artifact changed for {epic_id}")
             if not data:
                 continue
             filename = f"{jira_key}-frontmatter.yaml"
@@ -734,7 +795,7 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key,
 
 def _submit_strategy(server, user, token, strat_id, plan, dry_run,
                      artifacts_dir="artifacts", ledger=None,
-                     branch_plans=None):
+                     branch_plans=None, source_hashes=None):
     """Execute all submission phases for one strategy.
 
     Returns (created_count, error_count).
@@ -761,6 +822,13 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
             print(f"  ERROR: Branch plans do not match the manifest: "
                   f"{error}", file=sys.stderr)
             return 0, 1
+
+    key_conflicts = _ledger_key_conflicts(plan, ledger)
+    if key_conflicts:
+        print("  ERROR: Artifact Jira keys conflict with the ledger: "
+              + "; ".join(key_conflicts), file=sys.stderr)
+        print("  No Jira writes were made in this attempt.", file=sys.stderr)
+        return 0, 1
 
     failure = None
     recovery = (
@@ -791,6 +859,13 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
               f"  Report the failure. {recovery}", file=sys.stderr)
         return 0, 1
 
+    target_failure = _validate_reused_jira_targets(
+        server, user, token, plan, strat_id)
+    if target_failure:
+        print(f"  ERROR: {target_failure}", file=sys.stderr)
+        print("  No Jira writes were made in this attempt.", file=sys.stderr)
+        return 0, 1
+
     # Fetch strategy assignee to propagate to epics
     assignee_id = _get_strat_assignee(server, user, token, strat_id)
 
@@ -815,7 +890,8 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     # Phase 3: Attach frontmatter YAML to each epic
     print("  Phase 3: Attaching frontmatter metadata...")
     errors += _attach_frontmatter(
-        server, user, token, plan, id_to_jira_key, ledger=ledger)
+        server, user, token, plan, id_to_jira_key, ledger=ledger,
+        source_hashes=source_hashes)
 
     # Phase 4: Attach conditional branch plans to investigation epics
     print("  Phase 4: Attaching branch plans...")
@@ -870,7 +946,11 @@ def _run_submission(server, user, token, strat_id, plan, dry_run,
     return _submit_strategy(
         server, user, token, strat_id, plan, dry_run,
         artifacts_dir=artifacts_dir, ledger=ledger,
-        branch_plans=manifest.get("branch_plans", []))
+        branch_plans=manifest.get("branch_plans", []),
+        source_hashes={
+            entry["epic_id"]: entry["source_sha256"]
+            for entry in manifest.get("epics", [])
+        })
 
 
 def main():
@@ -991,10 +1071,27 @@ def main():
 
         try:
             with submission_lock(strat_id):
+                passed, review_data = _check_review_passed(
+                    args.artifacts_dir, strat_id)
+                if not passed:
+                    print("  SKIP: Review did not pass (or not found)")
+                    total_skipped += 1
+                    continue
+                epics = _scan_epics(args.artifacts_dir, strat_id)
+                if not epics:
+                    print("  SKIP: No epic artifacts found")
+                    total_skipped += 1
+                    continue
+                plan = _build_plan(epics, valid_components)
+                review_path = os.path.join(
+                    args.artifacts_dir, "epic-reviews",
+                    f"{strat_id}-decomp-review.md")
                 manifest = _build_current_manifest(
                     strat_id, plan, review_data, review_path,
                     args.artifacts_dir)
-                if args.resume:
+                existing_manifest_path = manifest_path(
+                    args.artifacts_dir, strat_id)
+                if args.resume or os.path.exists(existing_manifest_path):
                     manifest, ledger = _load_existing_submission(
                         args.artifacts_dir, strat_id, manifest)
                     created, errors = _run_submission(
@@ -1014,7 +1111,8 @@ def main():
                 total_errors += errors
         except (SubmissionManifestError, SubmissionLedgerError,
                 SubmissionLockError) as error:
-            print(f"  ERROR: {error}", file=sys.stderr)
+            print(f"  ERROR: {sanitize_log_message(error)}",
+                  file=sys.stderr)
             total_errors += 1
 
     # ── Summary ──

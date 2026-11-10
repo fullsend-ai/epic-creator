@@ -36,7 +36,7 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
-def approved_source_digest(path):
+def approved_source_snapshot(path):
     try:
         data, body = read_frontmatter(path)
     except yaml.YAMLError as error:
@@ -44,9 +44,15 @@ def approved_source_digest(path):
             f"Cannot read frontmatter from {path}: {error}") from error
     if not isinstance(data, dict):
         raise SubmissionManifestError(f"Cannot read frontmatter from {path}.")
-    data.pop("jira_key", None)
-    payload = {"frontmatter": data, "body": body}
-    return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+    approved_data = dict(data)
+    approved_data.pop("jira_key", None)
+    payload = {"frontmatter": approved_data, "body": body}
+    digest = hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+    return data, body, digest
+
+
+def approved_source_digest(path):
+    return approved_source_snapshot(path)[2]
 
 
 def _canonical_json(value):

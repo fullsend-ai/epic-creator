@@ -48,6 +48,18 @@ def safe_error_message(error):
     return type(error).__name__
 
 
+def sanitize_log_message(message, max_length=500):
+    """Return a bounded, single-line message safe for CI logs."""
+    text = str(message)
+    text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text)
+    text = "".join(char if char.isprintable() else " " for char in text)
+    text = text.replace("::", "|")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_length:
+        text = text[:max_length - 1].rstrip() + "…"
+    return text
+
+
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
 
 def make_request(url, user, token, body=None, method=None):
