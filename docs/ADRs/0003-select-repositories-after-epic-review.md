@@ -31,18 +31,6 @@ repositories. These inputs may identify a repository, but sometimes leave
 the answer uncertain. This ADR aims to add repository selection using those
 inputs while preserving the existing process for drafting and reviewing Epics.
 
-## Options
-
-**Select after review.** A separate agent reads the finished Epic and selects
-its repository. This limits the change to a new step in the existing workflow,
-but cannot fix an Epic that needs changes in more than one repository.
-
-**Plan repositories before drafting.** Repository information helps determine
-how work is divided into Epics, as explored in the
-[broader proposal](https://github.com/fullsend-ai/epic-creator/pull/45).
-This could produce Epics that each fit one repository, but changes the
-decomposition process as well as adding repository selection.
-
 ## Decision
 
 We add a separate repository-selection agent after final Epic review to
