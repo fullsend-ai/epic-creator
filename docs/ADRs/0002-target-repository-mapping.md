@@ -55,6 +55,16 @@ inventory and evidence. Resolve each implementation scope to a supported target
 or explicitly mark it unresolved. Never select a default repository to complete
 the plan.
 
+If drafting or review finds that the repository plan is wrong, even when its
+inputs have not changed, return the finding to repository planning as input to
+a new plan. For example, concrete acceptance criteria may reveal that a planned
+PR requires changes in two repositories. Keep each finalized plan immutable
+within its drafting and review pass; do not edit it in place. Draft and review
+the replacement plan again before publication. Limit the number of replanning
+attempts per source. If the limit is reached without a valid reviewed plan,
+report that source as needing replanning, distinct from other review failures,
+and preserve the findings for a later attempt.
+
 ### Use Architecture Context for RHAI repository selection
 
 Use release-appropriate documents and active overlays from
@@ -150,6 +160,8 @@ download evidence attachments or repeat inventory, revision or digest validation
 - Unresolved work remains visible with an empty repository field and a warning
   that enables human correction.
 - Source changes can invalidate a plan and require fresh review.
+- Drafting or review can expose a wrong plan without source changes; bounded
+  replanning carries those findings forward into a new drafting and review pass.
 - Publication provides a canonical repository URL or an explicit unresolved
   result. Adoption of that field by coding automation is separate work.
 
