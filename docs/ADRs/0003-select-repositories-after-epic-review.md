@@ -38,9 +38,7 @@ identify where each Epic should be implemented without changing its content.
 
 The agent, called RepoMapper, reads the final Epic, its parent strategy and
 the existing Architecture Context. It returns one repository URL with a reason
-and supporting evidence, or explains why it cannot determine one. It does not
-rewrite or split Epics, change their dependencies, or contact Jira. We choose
-this approach to keep repository selection separate from decomposition.
+and supporting evidence, or explains why it cannot determine one.
 
 The existing publisher writes a resolved URL to the Epic's configured Jira URL
 field. When the repository cannot be determined, it still creates the Epic,
