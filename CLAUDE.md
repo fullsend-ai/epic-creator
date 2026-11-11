@@ -158,25 +158,11 @@ Architecture context is used during decomposition to:
 - Determine upstream dependency maturity
 - Inform AI implementability scoring (Signal 9: architecture claims)
 
-## Isolated repository mapping
+## Repository Mapping
 
-After the final decomposition review/revision, `MAP_REPOSITORIES` dispatches
-`skills/repo-map/SKILL.md` through a strategy-specific agent. Mapping results
-live in `artifacts/repository-mappings/{ID}.json`. Inputs remain unchanged.
-The result includes a digest of the final drafts, strategy and Architecture
-Context; changed inputs require a fresh selection.
+After final Epic review, the pipeline calls [repo-map](skills/repo-map/SKILL.md)
+to select repositories using the Epic, its parent strategy and Architecture
+Context. Results are saved under `artifacts/repository-mappings/`.
 
-The publisher consumes resolved repository URLs for new Epics. Set
-`EPIC_REPOSITORY_URL_FIELD` to the existing RHAI Epic URL custom-field ID;
-the publisher verifies its URL type and create-screen availability. Historical
-RHAI configuration uses `customfield_10933`; verify it before activation.
-An unresolved result creates an Epic without a URL and adds an explanatory
-Jira comment. Already-published Epics and manually supplied Jira URLs remain
-untouched. Missing/incompatible URL configuration also leaves the field unset
-and adds a comment. Mapper result files are not Jira credentials. Pending repository-warning
-comments use an optional Epic metadata marker so a retry reuses the created
-issue and deduplicates its comment; unrelated existing Epics are skipped.
-
-Mapper-only synthetic cases and exact expected-answer scoring are in
-`eval/repo-map.yaml`. Agent runs are required to establish mapping correctness;
-Python tests validate the result and publication contracts only.
+The publisher writes the selected URL to Jira's configured repository field,
+or leaves it empty and adds an explanatory comment when selection is uncertain.
