@@ -11,7 +11,7 @@ topics:
 # ADR-0002: Assign one target repository to each implementation epic
 
 Date: 2026-10-22
-Updated: 2026-11-10
+Updated: 2026-11-11
 
 ## Status
 
@@ -31,9 +31,10 @@ serves a different purpose: discovering repositories and connecting products,
 builds, packages and upstreams. Those relationships can help populate architecture
 sources, but do not by themselves explain where a particular code change belongs.
 
-This decision covers Epic Creator's repository planning and Jira publication.
-Code-agent dispatch and support for tickets created outside Epic Creator are
-separate consumer concerns.
+This decision covers Epic Creator's repository planning, validation and Jira
+publication. Its scope ends with the published Epic containing a repository URL
+or an explicit warning. Fullsend ticket filtering, code-agent dispatch and
+approval mechanisms are outside this decision.
 
 ## Decision
 
@@ -101,29 +102,17 @@ comment, deduplicating the comment across retries:
 > The target repository is missing or unresolved. Confirm and update the target
 > repository before starting work on this epic.
 
-Their source remains incomplete. Investigation Epics also omit the repository
-URL. Invalid plans, stale inputs and failures to retrieve required evidence still
-stop processing.
-
-### Human approval before coding
-
-Require a human to approve each Epic before coding starts. Repository assignment,
-strategy-level human sign-off and automated decomposition review do not establish
-Epic approval. The current publisher does not record or enforce a distinct
-per-Epic approval artifact.
-
-Before coding is enabled, the consumer contract must define a durable approval
-record identifying the Epic, approving human and approved scope and repository.
-The consumer must block dispatch when that record is absent or no longer matches
-the current Epic. The human must confirm the target repository and resolve any
-missing-repository warning before approval. This ADR establishes the requirement;
-consumer enforcement remains separate work.
+A human can add or correct the repository URL after publication. Their source
+remains incomplete. Investigation Epics also omit the repository URL. Invalid
+plans, stale inputs and failures to retrieve required evidence still stop
+processing.
 
 ### Preserve existing submission retry behavior
 
-Preserve existing submission retry behavior and avoid duplicate warning comments.
+Preserve existing submission retry behavior so resuming an interrupted submission
+reuses already-created Epics and avoids duplicate Epics and warning comments.
 
-### URL validation shared by publisher and consumer
+### Validate the repository selection before publication
 
 Represent a resolved target as `https://<host>/<namespace>/<repository>`, derived
 from the reviewed approved-inventory entry. Preserve the canonical inventory
@@ -131,17 +120,25 @@ spelling and namespace path. Omit a trailing slash and `.git` suffix; credential
 ports, query strings, fragments and repository subpaths are not part of the URL.
 Do not infer a contribution destination from a redirect or a product mapping.
 
-The publisher validates the selected identity against the bound inventory and
-source evidence before creation. An unresolved or Investigation Epic omits the
-field; an empty value never authorizes dispatch. Malformed or conflicting values
-require explicit reconciliation rather than normalization into a guessed target.
+Epic Creator validates each resolved repository against the contribution inventory
+and supporting source evidence before publication. Record the selection evidence
+and the inventory, mapping and plan revisions or digests needed to verify the
+reviewed assignment. Before submission, check that the plan and its bound inputs
+still match the reviewed versions. Changes that invalidate that review require
+replanning and review before publication.
 
-Before dispatch, the consumer must validate the URL against the approved inventory
-and the reviewed assignment, and verify the matching human approval. An unknown
-or no-longer-approved entry blocks dispatch pending reconciliation and, when bound
-inputs change, replanning and review. A syntactically valid URL alone is
-insufficient. These consumer checks remain to be implemented in the separate
-consumer contract.
+A missing repository, ambiguous mapping, conflicting evidence or unsupported
+candidate leaves the assignment unresolved. Create the Epic without a repository
+URL and include the warning in its description and a deduplicated comment so a
+human can supply or correct the repository. Preserve the specific reason and
+candidate repositories, when available, in the selection evidence. An unresolved
+assignment alone does not block Epic creation. Investigation Epics also omit the
+repository field.
+
+Malformed plans, stale reviewed inputs and failures to retrieve required evidence
+still stop submission; they must not be treated as ordinary unresolved assignments.
+These checks belong to Epic Creator. This decision does not require Fullsend to
+download evidence attachments or repeat inventory, revision or digest validation.
 
 ## Consequences
 
@@ -149,11 +146,11 @@ consumer contract.
   while preserving cross-repository dependencies and strategy coverage.
 - Assignments are traceable to reviewed evidence, at the cost of maintaining
   source ownership, architecture context and approved contribution inventories.
-- Unresolved work remains visible without inventing a dispatch destination;
-  missing targets must be resolved before coding starts.
+- Unresolved work remains visible with an empty repository field and a warning
+  that enables human correction.
 - Source changes can invalidate a plan and require fresh review.
-- The consumer must read and validate the URL before dispatch. Enabling the field
-  in Jira and implementing that consumer contract remain separate responsibilities.
+- Publication provides a canonical repository URL or an explicit unresolved
+  result. Adoption of that field by coding automation is separate work.
 
 ## References
 
