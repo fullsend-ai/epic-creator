@@ -48,9 +48,9 @@ not remap existing Jira Epics or overwrite manually supplied URLs.
 
 ## Forge scope
 
-Repository selection is forge-neutral: targets may be on GitHub, GitLab or
-Forgejo. The agent returns a repository URL; this decision adds no forge API
-calls or changes to how code is submitted on any of those services.
+This decision applies regardless of where the repository is hosted. The
+mapper selects a repository URL; it does not integrate with the hosting
+service.
 
 ## Consequences
 
