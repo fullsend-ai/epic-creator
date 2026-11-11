@@ -1,0 +1,7 @@
+expected_repository: null
+expected_status: unresolved_missing
+held_out: false
+provenance: authored fixture, not owner-verified production data
+rationale: The component has no documented contribution repository.
+strat_id: RHAISTRAT-9104
+tier: synthetic

@@ -1,6 +1,6 @@
 ---
 title: 'Assign one target repository to each implementation epic'
-status: Proposed
+status: Accepted
 topics:
   - workloads
   - jira
@@ -15,7 +15,7 @@ Updated: 2026-11-11
 
 ## Status
 
-Proposed.
+Accepted upon merge of this decision and its first-stage implementation.
 
 ## Context
 
@@ -85,10 +85,9 @@ its repository-discovery data may help populate platform definitions and generat
 Architecture Context. That is a future integration, not a dependency of this
 Epic Creator decision.
 
-Other workloads configure their own maintained evidence and inventory while
-using the same planner. Source definitions declare ownership, authoritative or
-supporting roles, Git locations, revisions and relevant paths. Project-specific
-mapping rules belong in workload data.
+Broader workload-specific inventory and source-policy configuration remains
+future work. The isolated first delivery consumes the existing local
+Architecture Context; it does not introduce a new inventory framework.
 
 ### Publish the canonical URL in the existing Jira field
 

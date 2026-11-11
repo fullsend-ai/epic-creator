@@ -1,0 +1,66 @@
+name: repo-map
+description: Isolated repository selection against synthetic expected answers
+execution:
+  mode: case
+  skill: repo-map
+  arguments: "{strat_id}"
+  timeout: 600
+  max_budget_usd: 5
+runner:
+  type: claude-code
+  plugin_dirs: ["."]
+  settings:
+    enabledPlugins:
+      "*": false
+models:
+  skill: claude-opus-4-6
+permissions:
+  allow: [Bash, Read, Glob, Write]
+hooks:
+  before_each:
+    - command: bash "$AGENT_EVAL_PROJECT_ROOT/eval/scripts/stage-case.sh"
+      timeout: 120
+dataset:
+  path: repo-map-cases
+  workspace:
+    files: [artifacts, .context]
+  schema: |
+    Synthetic, authored Epic/strategy/context cases. input.yaml contains
+    strat_id. annotations.yaml contains expected_status, expected_repository,
+    tier and rationale and must not be staged for the agent. The fixtures
+    use illustrative repository URLs; they are not real routing assertions.
+outputs:
+  - path: artifacts/repository-mappings
+    schema: |
+      {strat_id}.json with strategy_id, input_digest, complete and results.
+      Each result contains epic_id, status, repository_url, reason and evidence.
+judges:
+  - name: expected_repository
+    description: Exact expected answer; an allowed but incorrect repository fails
+    check: |
+      import json
+      ann = outputs.get('annotations') or {}
+      files = outputs.get('files') or {}
+      expected_path = 'artifacts/repository-mappings/' + ann['strat_id'] + '.json'
+      content = files.get(expected_path)
+      if not isinstance(content, str):
+          return False, 'Missing mapping result'
+      try:
+          data = json.loads(content)
+          rows = data['results']
+          if data.get('complete') is not True or len(rows) != 1:
+              return False, 'Incomplete or unexpected mapping results'
+          row = rows[0]
+          ok = (data.get('strategy_id') == ann['strat_id']
+                and row.get('epic_id') == ann['strat_id'] + '-E001'
+                and row.get('status') == ann['expected_status']
+                and row.get('repository_url') == ann['expected_repository']
+                and bool(row.get('reason'))
+                and (row.get('status') != 'resolved' or bool(row.get('evidence'))))
+          return ok, 'Compared exact status and repository against hidden annotations'
+      except (ValueError, KeyError, TypeError):
+          return False, 'Malformed mapping result'
+traces:
+  stdout: true
+  stderr: true
+  metrics: true

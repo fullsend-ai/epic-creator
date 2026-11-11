@@ -1,0 +1,8 @@
+expected_repository: null
+expected_status: unresolved_ambiguous
+held_out: false
+provenance: authored fixture, not owner-verified production data
+rationale: API implementation may belong in https://github.com/example/operator or
+  https://github.com/example/dashboard; no ownership boundary is documented.
+strat_id: RHAISTRAT-9105
+tier: synthetic

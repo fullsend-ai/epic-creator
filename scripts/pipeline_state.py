@@ -55,7 +55,7 @@ PHASES = [
     "BATCH_START", "FETCH", "DECOMPOSE", "REVIEW_DECOMP",
     "REVISE_DECOMP",
     "RE_REVIEW_CHECK", "RE_REVIEW", "REVISE_CHECK", "RE_REVISE",
-    "BATCH_DONE", "ERROR_COLLECT",
+    "MAP_REPOSITORIES", "BATCH_DONE", "ERROR_COLLECT",
     "REPORT", "DONE",
 ]
 
@@ -63,6 +63,13 @@ PHASES = [
 
 PHASE_CONFIG = {
     "BATCH_START": {"type": "noop"},
+    "MAP_REPOSITORIES": {
+        "type": "agent",
+        "prompt": "skills/epic-decompose/prompts/repo-map-agent.md",
+        "ids_file": "tmp/pipeline-active-ids.txt",
+        "poll_phase": "map_repositories",
+        "vars": {"ID": "{ID}"},
+    },
     "FETCH": {
         "type": "agent",
         "prompt": "skills/epic-decompose/prompts/fetch-agent.md",
@@ -206,6 +213,16 @@ def _compute_ai_scores(ids_file):
 MAIN_SEQUENCE = ["FETCH", "DECOMPOSE", "REVIEW_DECOMP"]
 
 
+def _require_repository_mapping(dry_run):
+    if dry_run:
+        return
+    from artifact_utils import update_frontmatter
+    for strat_id in _read_ids('tmp/pipeline-active-ids.txt'):
+        path = f'artifacts/epic-tasks/{strat_id}-decomposition.md'
+        if os.path.exists(path):
+            update_frontmatter(path, {'repository_mapping_required': True}, 'decomp-summary')
+
+
 def advance(state, dry_run=False):
     """Compute and apply the next phase transition.
 
@@ -266,7 +283,8 @@ def advance(state, dry_run=False):
                 except Exception:
                     pass
         if not revised_ids:
-            return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: revision made no changes"
+            _require_repository_mapping(dry_run)
+            return "MAP_REPOSITORIES", "RE_REVIEW_CHECK → MAP_REPOSITORIES: revision made no changes"
         if not dry_run:
             _write_ids("tmp/pipeline-revise-ids.txt", revised_ids)
             # Delete old review files so the poller can detect fresh reviews
@@ -308,13 +326,17 @@ def advance(state, dry_run=False):
             return ("RE_REVISE",
                     f"REVISE_CHECK → RE_REVISE:"
                     f" failing={len(failing_ids)} cycle={cycle + 1}/2")
-        return "BATCH_DONE", "REVISE_CHECK → BATCH_DONE: review passed or cycle cap reached"
+        _require_repository_mapping(dry_run)
+        return "MAP_REPOSITORIES", "REVISE_CHECK → MAP_REPOSITORIES: review passed or cycle cap reached"
 
     # --- RE_REVISE → RE_REVIEW_CHECK (loop back) ---
     if phase == "RE_REVISE":
         if not dry_run:
             _compute_ai_scores("tmp/pipeline-revise-ids.txt")
         return "RE_REVIEW_CHECK", "RE_REVISE → RE_REVIEW_CHECK"
+
+    if phase == "MAP_REPOSITORIES":
+        return "BATCH_DONE", "MAP_REPOSITORIES → BATCH_DONE"
 
     # --- BATCH_DONE decision ---
     if phase == "BATCH_DONE":

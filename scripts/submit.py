@@ -24,6 +24,7 @@ import argparse
 import glob
 import http.client
 import os
+from pathlib import Path
 import re
 import sys
 
@@ -45,6 +46,10 @@ from jira_utils import (
     require_env,
     verify_jira_auth,
     has_existing_epics,
+    get_comments,
+    adf_to_markdown,
+    normalize_for_compare,
+    add_comment,
     add_attachment,
     api_call,
     create_issue,
@@ -203,6 +208,25 @@ def _build_plan(epics, valid_components):
     Returns list of plan entries with all fields needed for submission.
     """
     plan = []
+    mappings = {}
+    if epics:
+        from repository_mapping import load_mapping, mapping_complete, input_digest
+        artifacts = Path(epics[0][0]).parent.parent
+        strategy = epics[0][1]['parent_strat']
+        mapping_path = artifacts / 'repository-mappings' / f'{strategy}.json'
+        summary = artifacts / 'epic-tasks' / f'{strategy}-decomposition.md'
+        if summary.exists():
+            summary_data, _ = read_frontmatter(str(summary))
+            if (summary_data or {}).get('repository_mapping_required') and not mapping_path.exists():
+                raise ValueError('Required repository mapping is missing')
+        if mapping_path.exists():
+            ids = {data['epic_id'] for _, data, _ in epics}
+            if not mapping_complete(mapping_path, ids):
+                raise ValueError('Repository mapping is incomplete or invalid')
+            mapping = load_mapping(mapping_path)
+            if mapping['strategy_id'] != strategy or mapping.get('input_digest') != input_digest(strategy, artifacts):
+                raise ValueError('Repository mapping does not match final inputs')
+            mappings = {row['epic_id']: row for row in mapping['results']}
     for path, data, body in epics:
         epic_id = data["epic_id"]
         title = data["title"]
@@ -247,8 +271,12 @@ def _build_plan(epics, valid_components):
             "path": path,
             "body": body,
             "jira_key": jira_key,
+            "repository_warning_pending": data.get("repository_warning_pending"),
         })
 
+    for entry in plan:
+        if entry['epic_id'] in mappings:
+            entry['repository_mapping'] = mappings[entry['epic_id']]
     return plan
 
 
@@ -296,6 +324,31 @@ def _get_strat_assignee(server, user, token, strat_id):
         return None
 
 
+def _publish_repository_warning(server, user, token, entry, jira_key, retry=False):
+    message = entry.get('repository_warning_pending')
+    if not message:
+        return 0
+    try:
+        exists = False
+        if retry:
+            field = os.environ.get('EPIC_REPOSITORY_URL_FIELD', '')
+            if re.fullmatch(r'customfield_\d+', field):
+                issue = get_issue(server, user, token, jira_key, fields=[field])
+                exists = bool(issue.get('fields', {}).get(field))
+            if not exists:
+                exists = any(normalize_for_compare(adf_to_markdown(c.get('body', {}))) ==
+                             normalize_for_compare(message)
+                             for c in get_comments(server, user, token, jira_key))
+        if not exists:
+            add_comment(server, user, token, jira_key, markdown_to_adf(message))
+        update_frontmatter(entry['path'], {'repository_warning_pending': None}, 'epic-task')
+        return 0
+    except Exception as error:
+        print(f'  ERROR adding repository warning to {jira_key}: '
+              f'{safe_error_message(error)}', file=sys.stderr)
+        return 1
+
+
 def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
     """Create epic issues in Jira. Writes jira_key to frontmatter on success.
 
@@ -310,11 +363,19 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
         if entry["jira_key"]:
             id_to_jira_key[entry["epic_id"]] = entry["jira_key"]
 
+    repository_field = None
+    if any(e.get('repository_mapping', {}).get('status') == 'resolved'
+           and not e.get('jira_key') for e in plan):
+        from repository_publication import verified_url_field
+        repository_field = verified_url_field(server, user, token, TARGET_PROJECT)
+
     for entry in plan:
         epic_id = entry["epic_id"]
 
         # Skip already-created epics (idempotent resume)
         if entry["jira_key"]:
+            errors += _publish_repository_warning(server, user, token, entry,
+                                                   entry['jira_key'], retry=True)
             print(f"  SKIP {entry['jira_key']} <- {epic_id} "
                   f"(already created)")
             continue
@@ -327,6 +388,11 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
             # Components list (empty if no mapping)
             components = [entry["component"]] if entry["component"] else []
 
+            repository_args = {}
+            mapping = entry.get('repository_mapping')
+            if mapping and mapping['status'] == 'resolved' and repository_field:
+                repository_args = {'repository_url_field': repository_field,
+                                   'repository_url': mapping['repository_url']}
             jira_key = create_issue(
                 server, user, token,
                 project=TARGET_PROJECT,
@@ -338,6 +404,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
                 components=components,
                 parent_key=strat_id,
                 assignee_id=assignee_id,
+                **repository_args,
             )
         except Exception as e:
             print(f"  ERROR creating {epic_id}: {e}", file=sys.stderr)
@@ -351,8 +418,16 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
         # create_issue try-block so a frontmatter write failure doesn't
         # discard the returned jira_key (which would cause duplicates).
         try:
-            update_frontmatter(entry["path"],
-                               {"jira_key": jira_key}, "epic-task")
+            updates = {'jira_key': jira_key}
+            if mapping and not repository_args:
+                reason = (mapping['reason'] if mapping['status'] != 'resolved' else
+                          'The configured repository URL field is unavailable or incompatible.')
+                message = ('The target repository is missing or unresolved. '
+                           'Confirm and update the target repository before starting work on this epic.\n\n'
+                           + reason)
+                updates['repository_warning_pending'] = message
+                entry['repository_warning_pending'] = message
+            update_frontmatter(entry["path"], updates, "epic-task")
         except Exception as e:
             print(f"  ERROR persisting jira_key {jira_key} for "
                   f"{epic_id}: {e}", file=sys.stderr)
@@ -366,6 +441,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
             break  # Stop — frontmatter is out of sync
 
         id_to_jira_key[epic_id] = jira_key
+        errors += _publish_repository_warning(server, user, token, entry, jira_key)
         print(f"  Created {jira_key} <- {epic_id}: "
               f"{entry['title'][:50]}")
 

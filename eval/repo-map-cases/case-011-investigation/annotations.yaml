@@ -1,0 +1,7 @@
+expected_repository: null
+expected_status: unresolved_missing
+held_out: true
+provenance: authored fixture, not owner-verified production data
+rationale: The component and implementation target depend on the investigation outcome.
+strat_id: RHAISTRAT-9111
+tier: synthetic

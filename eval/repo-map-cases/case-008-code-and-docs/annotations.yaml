@@ -1,0 +1,7 @@
+expected_repository: https://github.com/example/operator
+expected_status: resolved
+held_out: false
+provenance: authored fixture, not owner-verified production data
+rationale: Operator code and its API documentation both belong in https://github.com/example/operator.
+strat_id: RHAISTRAT-9108
+tier: synthetic
