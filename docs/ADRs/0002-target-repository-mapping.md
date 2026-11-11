@@ -28,9 +28,7 @@ A person or coding agent picking up the Epic must then find that repository.
 The repository cannot always be inferred from the Jira project or component.
 For example, Notebooks Server work can involve kubeflow, workbenches or
 workbenches-operator. Knowing the component does not tell the implementer
-which repository contains the code relevant to a particular change. A build
-repository or product fork may also differ from the repository that accepts
-contributions.
+which repository contains the code relevant to a particular change.
 
 Epic Creator already reads Architecture Context: documents describing product
 components, their responsibilities and repository relationships. Together with
@@ -93,10 +91,7 @@ as RHAI's architectural evidence. Reuse the shared bootstrap's checkout rather
 than fetching an independent architecture source. The imported RHAI
 component/repository mapping remains supporting evidence.
 
-Keep approved contribution destinations and contribution rules in the workload's
-inventory and policy. Architecture descriptions, product mappings and fork
-relationships do not independently authorize a contribution target. Conflicting
-or insufficient evidence leaves the assignment unresolved.
+Conflicting or insufficient evidence leaves the assignment unresolved.
 
 Do not add the [product/upstream mapping project](https://gitlab.cee.redhat.com/ospodata/mapping)
 as a direct input to Epic Creator for the current RHAI scope. For broader adoption,
