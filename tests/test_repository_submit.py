@@ -171,6 +171,49 @@ def test_lost_create_response_recovers_same_target(publication, monkeypatch):
     assert "keep-me" in jira.issues["RHAI-1"]["fields"]["labels"]
 
 
+def test_recovery_accepts_jira_empty_adf_attributes(publication, monkeypatch):
+    _, source, _, _, jira = publication
+    jira.failure = (("POST", "/issue"), "after")
+    assert run(monkeypatch, source) == 1
+    description = jira.issues["RHAI-1"]["fields"]["description"]
+    paragraph = next(node for node in description["content"] if node["type"] == "paragraph")
+    assert "attrs" not in paragraph
+    paragraph["attrs"] = {}
+    jira.failure = None
+    assert run(monkeypatch, source) == 0
+    assert set(jira.issues) == {source.stem, "RHAI-1"}
+    assert "epic-creator-auto-decomposed" in jira.issues[source.stem]["fields"]["labels"]
+
+
+@pytest.mark.parametrize("change", ["empty_attrs", "text", "nonempty_attrs", "marks"])
+def test_verify_jira_table_normalization(publication, change):
+    selected, source, _, _, _ = publication
+    entry = repository_submit.preflight(selected, source.stem, Path("artifacts"))["plan"][0]
+    entry["repo_url_field"] = "customfield_10933"
+    desired = {"type": "doc", "version": 1, "content": [{"type": "table", "content": [
+        {"type": "tableRow", "content": [{"type": "tableCell", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Reviewed scope"}]}]}]}]}]}
+    entry["desired"]["description_adf"] = desired
+    fields = {"project": {"key": "RHAI"}, "issuetype": {"name": "Epic"},
+              "labels": [entry["identity"], entry["fingerprint"]], "parent": {"key": source.stem},
+              entry["repo_url_field"]: entry["repo_url"], "summary": entry["desired"]["summary"],
+              "components": [{"name": name} for name in entry["desired"]["components"]],
+              "description": deepcopy(desired)}
+    cell = fields["description"]["content"][0]["content"][0]["content"][0]
+    cell["attrs"] = {}
+    if change == "text":
+        cell["content"][0]["content"][0]["text"] = "Changed scope"
+    elif change == "nonempty_attrs":
+        cell["attrs"] = {"colspan": 2}
+    elif change == "marks":
+        cell["content"][0]["content"][0]["marks"] = [{"type": "strong"}]
+    if change == "empty_attrs":
+        repository_submit._verify_issue(entry, {"key": "RHAI-1", "fields": fields}, source.stem)
+    else:
+        with pytest.raises(repository_submit.RepositoryError, match="published repository scope"):
+            repository_submit._verify_issue(entry, {"key": "RHAI-1", "fields": fields}, source.stem)
+
+
 @pytest.mark.parametrize("search", ["hidden", "incomplete"])
 def test_uncertain_create_is_not_repeated_without_a_complete_match(publication, monkeypatch, search):
     _, source, _, _, jira = publication

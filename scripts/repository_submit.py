@@ -179,6 +179,16 @@ def _source_issue(selected, submission, credentials):
     return issue
 
 
+def _normalize_adf(value):
+    """Jira may add empty node attributes when storing an ADF description."""
+    if isinstance(value, list):
+        return [_normalize_adf(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_adf(item) for key, item in value.items()
+                if not (key == "attrs" and item == {})}
+    return value
+
+
 def _verify_issue(entry, issue, source):
     from submit import TARGET_PROJECT, TARGET_ISSUE_TYPE
     fields = issue.get("fields", {})
@@ -196,7 +206,7 @@ def _verify_issue(entry, issue, source):
             raise RepositoryError(f"{issue['key']}: conflicting or missing repository URL (customfield_10933); reconcile explicitly")
         desired = entry["desired"]
         if (fields.get("summary") != desired["summary"]
-                or fields.get("description") != desired["description_adf"]
+                or _normalize_adf(fields.get("description")) != _normalize_adf(desired["description_adf"])
                 or sorted(c["name"] for c in fields.get("components", [])) != sorted(desired["components"])):
             raise RepositoryError(f"{issue['key']}: published repository scope differs from reviewed plan")
 
