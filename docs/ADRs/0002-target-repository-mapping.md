@@ -19,22 +19,41 @@ Accepted upon merge of this decision and its first-stage implementation.
 
 ## Context
 
-Epic Creator must identify where the work in each implementation Epic should be
-contributed. A Jira project or Component can span several repositories, while a
-product repository, fork or build source is not necessarily the approved
-contribution destination. Assigning a repository after drafting can also leave
-an Epic whose acceptance criteria require changes across multiple repositories.
+Epic Creator turns a strategy describing a desired product change into Jira
+Epics. Each Epic describes a piece of implementation work, with its scope,
+acceptance criteria and dependencies. Today, Epic Creator can draft and publish
+that work without identifying the source repository where it should be done.
+A person or coding agent picking up the Epic must then find that repository.
 
-For RHAI, Architecture Context provides component responsibilities, APIs and
-repository relationships needed to select a target. Product/upstream mapping
-serves a different purpose: discovering repositories and connecting products,
-builds, packages and upstreams. Those relationships can help populate architecture
-sources, but do not by themselves explain where a particular code change belongs.
+The repository cannot always be inferred from the Jira project or component.
+For example, Notebooks Server work can involve kubeflow, workbenches or
+workbenches-operator. Knowing the component does not tell the implementer
+which repository contains the code relevant to a particular change. A build
+repository or product fork may also differ from the repository that accepts
+contributions.
 
-This decision covers Epic Creator's repository planning, validation and Jira
-publication. Its scope ends with the published Epic containing a repository URL
-or an explicit warning. Fullsend ticket filtering, code-agent dispatch and
-approval mechanisms are outside this decision.
+Epic Creator already reads Architecture Context: documents describing product
+components, their responsibilities and repository relationships. Together with
+the strategy and the Epic's actual deliverables, those documents can support a
+repository choice. They can also be incomplete or leave several plausible
+choices. In that situation, the Epic needs an explanation of the uncertainty
+so a person can resolve it; a guessed URL would misdirect the work.
+
+There are two related changes to consider. One is to choose a repository for
+an Epic that has already been drafted. The other is to change how work is
+divided into Epics so that each Epic fits in one repository. The first is a
+smaller change to the existing workflow, but cannot make an existing Epic
+with deliverables in several repositories fit into one. For example, an Epic
+may include both product code and a specification published elsewhere.
+Historical PR destinations show where a team chose to contribute; they do
+not establish that those destinations were required.
+
+This ADR chooses the smaller change as the first delivery: add a dedicated
+repository-selection agent after drafting and review, then publish its
+supported choice in the Epic's existing Jira URL field. If it cannot choose,
+publish the Epic with an empty URL and an explanatory comment. Changing Epic
+boundaries remains a later delivery. How coding automation selects tickets,
+starts work or requests approval is outside this decision.
 
 ## Decision
 
