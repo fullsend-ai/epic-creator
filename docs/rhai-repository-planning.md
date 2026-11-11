@@ -83,9 +83,9 @@ Missing, conflicting or ambiguous destinations remain unresolved. Their planned
 PR scopes remain available for drafting and creation with no guessed repository.
 Each affected Epic carries the warning: "The target repository is missing or
 unresolved. Confirm and update the target repository before starting work on
-this epic." Submission includes this warning in its description and adds a Jira
-comment, checking existing comments on retries. Dependencies and all assigned
-work stay intact. Plans with pending resolution set `partial: true`; the source
+this epic." Submission adds this warning as a Jira comment, checking existing
+comments on retries. The warning is not repeated in the Epic description.
+Dependencies and all assigned work stay intact. Plans with pending resolution set `partial: true`; the source
 is not marked fully decomposed. Invalid source bindings, evidence or global plan
 conflicts still block creation.
 
@@ -151,8 +151,8 @@ publication before any writes. The publisher does not create or rename fields;
 no new `repo-url` field is required.
 
 Unresolved Epics and Investigations leave `customfield_10933` empty. Unresolved Epics keep
-the existing warning in their description and comment. Repository labels are no
-longer added; unrelated classification and retry-identity labels remain. Recovery
+the warning in a Jira comment, without repeating it in the description. Repository
+labels are no longer added; unrelated classification and retry-identity labels remain. Recovery
 verifies `customfield_10933` against the reviewed target and stops on missing or changed
 values rather than silently rewriting a published epic. Existing publications
 with the old label contract require explicit reconciliation; the publisher does

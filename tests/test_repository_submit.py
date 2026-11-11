@@ -332,7 +332,8 @@ def test_unresolved_epic_is_created_with_warning_and_evidence(unresolved_publica
     assert run(monkeypatch, source) == 0
     fields = jira.issues["RHAI-1"]["fields"]
     warning = repository_plan.REPOSITORY_WARNING
-    assert warning in json.dumps(fields["description"])
+    assert warning not in json.dumps(fields["description"])
+    assert "Target repository warning" not in json.dumps(fields["description"])
     assert fields["comment"] == [{"id": "1", "body": submit.markdown_to_adf(warning)}]
     assert not any(label.startswith("target-repo-") for label in fields["labels"])
     assert fields.get("customfield_10933") is None

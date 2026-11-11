@@ -72,8 +72,6 @@ def preflight(selected, key, root):
         if target:
             url = f"https://{target['host']}/{target['namespace']}/{target['repository']}"
             description += f"\n\n## Target repository\n\n{url}\n\nInventory key: {target['inventory_key']}\n"
-        if entry["repository_warning"]:
-            description += f"\n\n## Target repository warning\n\n{entry['repository_warning']}\n"
         description += f"\nMapping snapshot: {repository_context['digest']}\n"
         entry["repository_evidence"] = {
             "mapping_snapshot_digest": repository_context["digest"],

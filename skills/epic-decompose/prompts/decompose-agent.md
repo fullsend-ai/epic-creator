@@ -24,7 +24,8 @@ or subsystem epics and attach targets afterward. Never change the bound inventor
 plan, source snapshots or validation code. Draft only the finalized `scopes`.
 A partial plan retains unresolved PR scopes for creation. Draft their Epics with
 no target repository and copy the scope's exact `repository_warning` into
-frontmatter and prose. Never guess a target. Preserve all scope dependencies,
+frontmatter. The publisher posts this warning as a Jira comment; do not repeat
+it in the Epic prose. Never guess a target. Preserve all scope dependencies,
 including dependents of unresolved work. List unresolved work IDs, planned PRs,
 reasons and candidates in the summary; repository resolution remains pending.
 A plan with `ready_for_drafting: false` still blocks drafting entirely.
