@@ -584,3 +584,18 @@ def test_project_hook_does_not_duplicate_plugin_hook(tmp_path):
     assert plugin_result.returncode == 0, plugin_result.stderr
     assert plugin_result.stderr == ""
     assert "DECOMPOSE" in plugin_result.stdout
+
+
+def test_validator_rejects_invalid_pipeline_status_despite_completed_result(tmp_path):
+    iteration = tmp_path / "iteration"
+    _, repo = _fixture(iteration)
+    from pipeline_status import write_status
+    previous = Path.cwd()
+    try:
+        os.chdir(repo)
+        write_status("RHAISTRAT-9001", "invalid", "revise_decomp", "Epic dependencies conflict with repository scope plan")
+    finally:
+        os.chdir(previous)
+    result = _run_validator(iteration, repo)
+    assert result.returncode != 0
+    assert "Epic dependencies conflict" in result.stdout

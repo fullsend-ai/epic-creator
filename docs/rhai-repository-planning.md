@@ -116,6 +116,16 @@ correct target. Reviews bind the exact plan and decomposition content; later
 changes require fresh review. Changes to configuration, prompts, source strategy,
 mapping, inventory or guidance require a new run and reviewed plan.
 
+If review identifies a dependency or Investigation-gate correction, revise only
+the existing proposal's `depends_on`/`gated_by` fields, before editing Epics, and
+run `repository_plan.py revise-dependencies --source RHAISTRAT-1234`. The command
+requires the original reviewed decomposition, preserves PR boundaries and
+repository assignments, and validates the new graph against the same evidence.
+Update the Epics to match, validate with `--include-epics`, then obtain fresh
+review. Changes to other work or evidence still require replanning. A terminal
+invalid status is an execution error even if an older review passes; pipeline
+summaries and Fullsend validation must not report it as success.
+
 Use the existing submission commands after review:
 
 ```bash

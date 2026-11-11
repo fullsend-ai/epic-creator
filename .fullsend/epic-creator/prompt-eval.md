@@ -73,6 +73,12 @@ Write `$FULLSEND_OUTPUT_DIR/agent-result.json`. Valid JSON, no markdown fences.
 
 A completed result requires `phase: DONE` in `tmp/pipeline-state.yaml`. A failed
 business review (`pass: false`) can still be a completed pipeline result.
+Before declaring completion, run `batch_summary.py --counts-only` for all run
+IDs and read the current run report and `tmp/pipeline-status/`. An `invalid`
+source or execution error means `action: failed`: include its diagnostic in
+`errors`, even when an older review passes or the pipeline phase is DONE. Do not
+reset or discard invalid status to manufacture success. This also applies when
+resuming a DONE state after validation feedback.
 
 Empty-task example (empty `FULLSEND_TASK`, no pipeline state):
 

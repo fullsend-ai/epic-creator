@@ -227,6 +227,22 @@ def validate_repository_plan(plan: dict, context: dict) -> None:
         raise RepositoryError("Repository plan has unresolved required work")
 
 
+def revise_dependencies(context: dict, plan: dict, proposal: dict) -> dict:
+    """Re-finalize reviewed dependency corrections without changing PR ownership."""
+    validate_repository_plan(plan, context)
+
+    def without_dependencies(value):
+        return {**value, "work_items": [
+            {key: item for key, item in work.items() if key not in {"depends_on", "gated_by"}}
+            for work in value["work_items"]]}
+
+    if without_dependencies(proposal) != without_dependencies(plan["proposal"]):
+        raise RepositoryError("Only dependencies and Investigation gates may change; other work needs replanning")
+    revised = finalize_repository_plan(context, proposal)
+    validate_repository_plan(revised, context)
+    return revised
+
+
 def validate_epic_scopes(plan: dict, epics: list[dict]) -> None:
     if not plan.get("ready_for_drafting"):
         raise RepositoryError("Repository plan is unresolved")
@@ -279,12 +295,12 @@ def decomposition_digest(plan: dict, artifacts_dir: Path, source_key: str) -> st
 def paths(artifacts_dir, key):
     root = Path(artifacts_dir) / "repository-plans"
     return {"context": root / f"{key}-context.json", "proposal": root / f"{key}-proposal.json",
-            "plan": root / f"{key}.json"}
+            "plan": root / f"{key}.json", "previous_plan": root / f"{key}-previous.json"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "finalize", "validate"))
+    parser.add_argument("command", choices=("prepare", "finalize", "revise-dependencies", "validate"))
     parser.add_argument("--source", required=True)
     parser.add_argument("--artifacts-dir", default="artifacts", type=Path)
     parser.add_argument("--include-epics", action="store_true", help="Also validate drafted Epic assignments (validate only)")
@@ -303,6 +319,22 @@ def main():
                 return 2
             return 0
         context = json.loads(locations["context"].read_text())
+        if args.command == "revise-dependencies":
+            from pipeline_repositories import validate_artifact
+            old = json.loads(locations["plan"].read_text())
+            proposal = json.loads(locations["proposal"].read_text())
+            revised = revise_dependencies(context, old, proposal)
+            if revised == old:
+                return 0
+            # Run before editing Epics: the correction must start from a reviewed
+            # decomposition. Keep the old plan for revision completion checks;
+            # it never authorizes publication of the new plan.
+            validate_artifact({}, args.source,
+                              args.artifacts_dir / f"epic-reviews/{args.source}-decomp-review.md",
+                              "decomp-review", args.artifacts_dir)
+            atomic_json(locations["previous_plan"], old)
+            atomic_json(locations["plan"], revised)
+            return 0
         if args.command == "finalize":
             plan = finalize_repository_plan(context, json.loads(locations["proposal"].read_text()))
             if context.get("status") == "ready":

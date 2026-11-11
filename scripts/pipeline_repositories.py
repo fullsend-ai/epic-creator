@@ -117,9 +117,16 @@ def validate_artifact(state, key, path, schema, artifacts_dir="artifacts", *, re
     if schema == "epic-task" and data["epic_id"] != Path(path).stem:
         raise RepositoryError(f"{key}: epic identity conflicts with filename at {path}")
     if schema == "decomp-review" and bound_config(state).repository_policy:
-        from repository_plan import decomposition_digest
+        from repository_plan import decomposition_digest, paths, revise_dependencies
         plan = repository_plan_for(state, key, artifacts_dir)
-        if (data.get("repository_plan_digest") != plan["digest"]
+        reviewed_plan = plan
+        if not require_current_review and data.get("repository_plan_digest") != plan["digest"]:
+            previous = _json(paths(artifacts_dir, key)["previous_plan"])
+            context = _json(paths(artifacts_dir, key)["context"])
+            if revise_dependencies(context, previous, plan["proposal"]) != plan:
+                raise RepositoryError("Revised plan changes more than reviewed dependencies")
+            reviewed_plan = previous
+        if (data.get("repository_plan_digest") != reviewed_plan["digest"]
                 or (require_current_review and data.get("reviewed_decomposition_digest") != decomposition_digest(plan, Path(artifacts_dir), key))):
             raise RepositoryError("Review no longer matches repository plan or decomposition content")
     return data

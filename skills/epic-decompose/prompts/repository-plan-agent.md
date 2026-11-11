@@ -100,7 +100,12 @@ several Investigations are prerequisites, retain them all in `depends_on` and
 identify the primary scope/existence gate in `gated_by`. Items sharing a planned
 PR must share the same gate. Use `branch` only for a specific conditional outcome;
 do not invent a branch for unconditional work. Later drafting copies this gate
-exactly and explains its failure impact; it cannot add or change planned gates.
+exactly and explains its failure impact. Check whether each Investigation's
+negative outcome would require downstream scope changes, remediation, or removal;
+if so, model that dependency and gate now. A configurable fallback does not
+remove a prerequisite such as SDK availability. Later review corrections must
+use the controlled dependency-revision command and fresh review, never change
+Epic gates alone.
 
 Before finalizing, give prerequisites the highest priority of the work they
 transitively enable (P0 before P1 before P2). Documentation authoring does not

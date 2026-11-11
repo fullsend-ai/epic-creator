@@ -214,3 +214,50 @@ def test_drafting_cannot_supply_its_own_completed_review(monkeypatch, tmp_path, 
     next_phase, _ = pipeline_state.advance(state)
     assert next_phase == "REVIEW_DECOMP"
     assert not review.exists()
+
+
+def test_dependency_revision_preserves_repository_scopes_and_forces_review(monkeypatch, tmp_path, capsys):
+    import pipeline_state
+    source, old, metadata, review_path = reviewed_decomposition(monkeypatch, tmp_path, capsys)
+    review = {**metadata, "strat_id": source.stem, "score": 13, "pass": True,
+              "recommendation": "accept", "repository_plan_digest": old["digest"],
+              "reviewed_decomposition_digest": repository_plan.decomposition_digest(old, Path("artifacts"), source.stem)}
+    write_artifact(review_path, review, "decomp-review", body="Add the missing readiness gate.\n")
+    locations = repository_plan.paths("artifacts", source.stem)
+    context = json.loads(locations["context"].read_text())
+    # Reproduce the live run: an independent Investigation and one planned PR,
+    # followed by a review requiring the PR to depend on the Investigation.
+    draft = deepcopy(old["proposal"])
+    investigation = deepcopy(draft["work_items"][0])
+    investigation.update(id="I1", kind="investigation")
+    investigation.pop("planned_pr")
+    investigation.pop("resolution")
+    draft["work_items"].append(investigation)
+    old = repository_plan.finalize_repository_plan(context, draft)
+    repository_plan.atomic_json(locations["plan"], old)
+    write_repository_decomposition(source, old)
+    review.update(repository_plan_digest=old["digest"],
+                  reviewed_decomposition_digest=repository_plan.decomposition_digest(old, Path("artifacts"), source.stem))
+    write_artifact(review_path, review, "decomp-review", body="Add prerequisite edge.\n")
+    for item in draft["work_items"][:2]:
+        item.update(depends_on=["I1"], gated_by="I1")
+    repository_plan.atomic_json(locations["proposal"], draft)
+    monkeypatch.setattr(sys, "argv", ["repository_plan.py", "revise-dependencies", "--source", source.stem])
+    assert repository_plan.main() == 0
+    new = json.loads(locations["plan"].read_text())
+    assert new["digest"] != old["digest"]
+    write_repository_decomposition(source, new)
+    with pytest.raises(RepositoryError, match="Review no longer matches"):
+        pipeline_repositories.validate_artifact(pipeline_state._load_state(), source.stem,
+                                               review_path, "decomp-review")
+    artifacts.update_frontmatter(f"artifacts/epic-tasks/{source.stem}-decomposition.md", {"revised": False}, "decomp-summary")
+    state = pipeline_state._load_state()
+    state["phase"] = "REVISE_DECOMP"
+    pipeline_state._save_state(state)
+    capsys.readouterr()
+    pipeline_state.cmd_next_action([])
+    action = __import__("yaml").safe_load(capsys.readouterr().out)
+    assert action["phase"] == "RE_REVIEW"
+    assert action["action"] == "launch_wave"
+    assert pipeline_state.read_status(source.stem) is None
+    assert not review_path.exists()

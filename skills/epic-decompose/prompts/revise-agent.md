@@ -29,6 +29,28 @@ conditional scope and genuine dependencies. A target field must agree with actua
 scope/AC text. A plan-level target/evidence defect needs replanning and fresh
 review; report it rather than editing the bound plan or substituting a default.
 
+### Correct reviewed dependencies before editing Epics
+
+Dependency and Investigation-gate changes also change the plan contract. Never
+add/remove an Epic dependency or change `gated_by` only in Epic frontmatter.
+For a review finding that changes only dependencies or gates:
+
+1. Before changing any Epic, summary or rationale, edit the existing proposal
+   `artifacts/repository-plans/{ID}-proposal.json`. Change only work-item
+   `depends_on` and `gated_by`; keep requirements, scope, planned PRs, targets,
+   evidence, priorities, components, branches and work assignments unchanged.
+   Every work item in a planned PR must share its Investigation gate.
+2. Run `python3 scripts/repository_plan.py revise-dependencies --source {ID}`.
+   This requires the existing review to match the original decomposition,
+   revalidates the corrected graph, saves the previous plan, and finalizes the
+   revised plan. Never edit the final plan or its digests by hand. If rejected,
+   report the need for replanning; do not apply mismatching Epic edits.
+3. Read the revised final plan, then update Epic dependencies/gates and the DAG
+   to match it exactly. Describe gate failure impact in the affected Epic.
+4. Run `python3 scripts/repository_plan.py validate --source {ID} --include-epics`
+   before marking revision complete. The pipeline requires fresh review of the
+   new plan and content; the prior passing review cannot authorize publication.
+
 After any actual content change, set `revised=true`; the pipeline also detects
 changes from content digests and forces fresh review even if this flag is wrong.
 Maintain all repository metadata when correcting prose or scoring rationales.
@@ -102,7 +124,7 @@ If corrections were applied:
 4. Update frontmatter:
 
 ```bash
-python3 scripts/frontmatter.py set --source artifacts/strat-tasks/{ID}.md artifacts/epic-tasks/{ID}-decomposition.md revised=true epic_count=<N> critical_path_length=<N>
+python3 scripts/frontmatter.py set --source artifacts/strat-tasks/{ID}.md artifacts/epic-tasks/{ID}-decomposition.md epic_count=<N> critical_path_length=<N>
 ```
 
 ## Step 4: Verify Consistency
@@ -112,5 +134,13 @@ Before finishing, verify:
 - No circular dependencies in the DAG
 - Every epic referenced in `dependencies` lists actually exists as a file
 - `epic_count` in the summary matches the actual number of epic files
+- In repository mode, `repository_plan.py validate --source {ID} --include-epics`
+  succeeds with the revised plan and all Epic assignments/dependencies/gates
+
+Only after all checks pass, mark completion as your final command:
+
+```bash
+python3 scripts/frontmatter.py set --source artifacts/strat-tasks/{ID}.md artifacts/epic-tasks/{ID}-decomposition.md revised=true
+```
 
 Do not return a summary. Your work is complete when you have run `frontmatter.py set` with `revised=true` (changes made) or `revised=false` (no corrections needed). The pipeline uses this field to detect that the revision agent has finished.

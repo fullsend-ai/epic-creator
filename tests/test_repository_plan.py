@@ -223,3 +223,45 @@ def test_investigation_gate_is_preserved_without_branch(inputs):
     assert conditional.get("branch") is None
     assert conditional["gated_by"] == "investigation/I1"
     assert conditional["dependencies"] == ["investigation/I1"]
+
+
+def test_reviewed_dependency_revision_can_add_investigation_gate(inputs):
+    context, draft = inputs
+    investigation = deepcopy(draft["work_items"][0])
+    investigation.update(id="I1", kind="investigation")
+    investigation.pop("planned_pr")
+    investigation.pop("resolution")
+    draft["work_items"].append(investigation)
+    api = module("repository_plan")
+    old = api.finalize_repository_plan(context, draft)
+    revised = deepcopy(draft)
+    for item in revised["work_items"][:2]:
+        item.update(depends_on=["I1"], gated_by="I1")
+    plan = api.revise_dependencies(context, old, revised)
+    api.validate_repository_plan(plan, context)
+    api.validate_epic_scopes(plan, epic_metadata(plan))
+    assert plan["digest"] != old["digest"]
+    scope = next(s for s in plan["scopes"] if s["kind"] == "implementation")
+    assert scope["dependencies"] == ["investigation/I1"]
+    assert scope["gated_by"] == "investigation/I1"
+
+
+@pytest.mark.parametrize("field,value", [("planned_pr", "other"), ("priority", "P1"), ("team", "Other")])
+def test_dependency_revision_cannot_change_bound_work(inputs, field, value):
+    context, draft = inputs
+    api = module("repository_plan")
+    old = api.finalize_repository_plan(context, draft)
+    revised = deepcopy(draft)
+    revised["work_items"][0][field] = value
+    with pytest.raises(RepositoryError, match="dependencies|replanning"):
+        api.revise_dependencies(context, old, revised)
+
+
+def test_dependency_revision_rejects_new_repository_assignment(inputs):
+    context, draft = inputs
+    api = module("repository_plan")
+    old = api.finalize_repository_plan(context, draft)
+    revised = deepcopy(draft)
+    revised["work_items"][0]["resolution"]["target_key"] = "dashboard"
+    with pytest.raises(RepositoryError, match="replanning"):
+        api.revise_dependencies(context, old, revised)
