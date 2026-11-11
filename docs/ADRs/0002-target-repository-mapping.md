@@ -19,39 +19,25 @@ Accepted upon merge of this decision and its first-stage implementation.
 
 ## Context
 
-Epic Creator turns a strategy describing a desired product change into Jira
-Epics. Each Epic describes a piece of implementation work, with its scope,
-acceptance criteria and dependencies. Today, Epic Creator can draft and publish
-that work without identifying the source repository where it should be done.
-A person or coding agent picking up the Epic must then find that repository.
+Epic Creator takes a product strategy and breaks it into implementation Epics
+in Jira. It currently does not fill in the repository URL for those Epics.
+Before implementation can begin, someone must determine which repository
+needs the change.
 
-The repository cannot always be inferred from the Jira project or component.
-For example, Notebooks Server work can involve kubeflow, workbenches or
-workbenches-operator. Knowing the component does not tell the implementer
-which repository contains the code relevant to a particular change.
+A Jira component is not enough to answer that question. For example,
+Notebooks Server work can belong in several different repositories. The
+choice depends on what the particular Epic asks to change. Epic Creator
+already has the Epic text, the parent strategy and Architecture Context
+(documents describing components and their repositories). We want to use
+those inputs to identify the repository and fill in the Epic's URL field.
 
-Epic Creator already reads Architecture Context: documents describing product
-components, their responsibilities and repository relationships. Together with
-the strategy and the Epic's actual deliverables, those documents can support a
-repository choice. They can also be incomplete or leave several plausible
-choices. In that situation, the Epic needs an explanation of the uncertainty
-so a person can resolve it; a guessed URL would misdirect the work.
-
-There are two related changes to consider. One is to choose a repository for
-an Epic that has already been drafted. The other is to change how work is
-divided into Epics so that each Epic fits in one repository. The first is a
-smaller change to the existing workflow, but cannot make an existing Epic
-with deliverables in several repositories fit into one. For example, an Epic
-may include both product code and a specification published elsewhere.
-Historical PR destinations show where a team chose to contribute; they do
-not establish that those destinations were required.
-
-This ADR chooses the smaller change as the first delivery: add a dedicated
-repository-selection agent after drafting and review, then publish its
-supported choice in the Epic's existing Jira URL field. If it cannot choose,
-publish the Epic with an empty URL and an explanatory comment. Changing Epic
-boundaries remains a later delivery. How coding automation selects tickets,
-starts work or requests approval is outside this decision.
+We need to add this capability without changing how Epic Creator divides
+work into Epics. The proposed approach is a separate agent that selects a
+repository after drafting and review are finished. When the available
+information does not support one repository, the Epic should still be
+created, with an empty URL and a comment explaining what needs clarification.
+Changing how Epics are divided so that each fits in one repository is
+separate, later work.
 
 ## Decision
 
