@@ -96,8 +96,9 @@ Do not create a new repository field or use repository labels as the target
 contract. Preserve unrelated workflow and classification labels.
 
 Unresolved implementation Epics retain their work and dependencies and omit the
-repository URL. Add the following warning to both the Epic description and a
-comment, deduplicating the comment across retries:
+repository URL. Add the following warning as a Jira comment, deduplicating it
+across retries. Keep the warning out of the Epic description so it does not leave
+stale description text after a human supplies the repository URL:
 
 > The target repository is missing or unresolved. Confirm and update the target
 > repository before starting work on this epic.
@@ -129,8 +130,8 @@ replanning and review before publication.
 
 A missing repository, ambiguous mapping, conflicting evidence or unsupported
 candidate leaves the assignment unresolved. Create the Epic without a repository
-URL and include the warning in its description and a deduplicated comment so a
-human can supply or correct the repository. Preserve the specific reason and
+URL and add the warning as a deduplicated comment so a human can supply or
+correct the repository. Preserve the specific reason and
 candidate repositories, when available, in the selection evidence. An unresolved
 assignment alone does not block Epic creation. Investigation Epics also omit the
 repository field.
