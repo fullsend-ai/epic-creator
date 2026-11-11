@@ -107,6 +107,9 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
         refs = item["requirement_refs"] + item["acceptance_refs"]
         if any(ref not in requirements for ref in refs):
             raise RepositoryError("Work item references unknown strategy requirement")
+        for field, kind in (("requirement_refs", "requirement"), ("acceptance_refs", "acceptance")):
+            if any(requirements[ref]["kind"] != kind for ref in item[field]):
+                raise RepositoryError(f"Work item {field} references the wrong source kind")
         coverage.update(refs)
         ac_refs = {ac["source_ref"] for ac in item["acceptance_criteria"]}
         if (not set(item["acceptance_refs"]) <= ac_refs
@@ -199,8 +202,8 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
                 entry = inventory[destinations[first["id"]]]
                 scope["target_repository"] = {name: entry[name] for name in TARGET_FIELDS}
                 scope["target_label"] = entry["label"]
-            if first.get("branch"):
-                scope["branch"] = first["branch"]
+        if first.get("branch"):
+            scope["branch"] = first["branch"]
         if first.get("gated_by"):
             scope["gated_by"] = item_scope[first["gated_by"]]
         scopes.append(scope)

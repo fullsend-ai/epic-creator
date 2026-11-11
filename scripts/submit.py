@@ -750,7 +750,7 @@ def main():
     # Determine which strategies to submit
     if args.all:
         epic_tasks_dir = os.path.join(args.artifacts_dir, "epic-tasks")
-        if not os.path.isdir(epic_tasks_dir) and not repository_mode:
+        if not os.path.isdir(epic_tasks_dir):
             print(f"Error: {epic_tasks_dir} is not a directory.",
                   file=sys.stderr)
             sys.exit(1)
@@ -764,20 +764,27 @@ def main():
         strat_ids = list(dict.fromkeys(args.strat_ids))
 
     submissions = {}
-    if repository_mode:
-        from repository_submit import preflight
-        try:
-            # Check every selected local plan before the first Jira write.
-            submissions = {key: preflight(selected, key, Path(args.artifacts_dir)) for key in strat_ids}
-        except Exception as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            sys.exit(1)
-
     total_created = 0
     total_skipped = 0
     total_errors = 0
+    if repository_mode:
+        from repository_submit import preflight
+        # Validate each strategy before writes, without blocking independent work.
+        for key in strat_ids:
+            passed, _ = _check_review_passed(args.artifacts_dir, key)
+            if not passed:
+                print(f"{key}: SKIP: Review did not pass (or not found)")
+                total_skipped += 1
+                continue
+            try:
+                submissions[key] = preflight(selected, key, Path(args.artifacts_dir))
+            except Exception as exc:
+                print(f"{key}: ERROR: {exc}", file=sys.stderr)
+                total_errors += 1
 
     for strat_id in strat_ids:
+        if repository_mode and strat_id not in submissions:
+            continue
         print(f"\n{'='*60}")
         print(f"Strategy: {strat_id}")
         print(f"{'='*60}")

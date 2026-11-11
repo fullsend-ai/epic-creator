@@ -301,7 +301,7 @@ def publication(submission, root, credentials):
             if not warning:
                 return
             body = jira.text_to_adf_paragraph(warning)
-            if not any(comment.get("body") == body for comment in jira.get_comments(*credentials, jira_key)):
+            if not any(_normalize_adf(comment.get("body")) == _normalize_adf(body) for comment in jira.get_comments(*credentials, jira_key)):
                 jira.api_call(credentials[0], f"/issue/{jira_key}/comment", credentials[1], credentials[2],
                               body={"body": body}, method="POST")
 

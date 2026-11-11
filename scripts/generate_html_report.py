@@ -239,6 +239,11 @@ def render_strategy_section(strat_id):
     score = review_fm.get("score", "?")
     passed = review_fm.get("pass", False)
     error = review_fm.get("error")
+    from pipeline_status import read_status
+    terminal_status = read_status(strat_id)
+    if terminal_status and terminal_status["status"] == "invalid":
+        error = terminal_status["message"] or "Invalid pipeline source"
+        passed = False
     issues = review_fm.get("issues") or []
     triage = decomp_fm.get("triage")
     epic_count = decomp_fm.get("epic_count", len(epics))

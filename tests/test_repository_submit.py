@@ -78,7 +78,8 @@ def test_shared_epic_creator_preserves_repository_scope(publication):
 
 def test_empty_repository_batch_is_successful(publication, monkeypatch):
     _, _, _, _, jira = publication
-    Path("artifacts/epic-tasks").rename("artifacts/prepared-epics")
+    for path in Path("artifacts/epic-tasks").iterdir():
+        path.unlink()
     monkeypatch.setattr(sys, "argv", ["submit.py", "--all"])
     try:
         submit.main()

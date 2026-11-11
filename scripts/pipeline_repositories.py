@@ -54,7 +54,10 @@ def repository_plan_for(state, key, artifacts_dir="artifacts", prepare=False):
     selected = bound_config(state)
     locations = paths(artifacts_dir, key)
     source = Path(artifacts_dir) / f"strat-tasks/{key}.md"
-    if prepare and not locations["context"].exists():
+    refresh_context = not locations["context"].exists()
+    if prepare and not refresh_context:
+        refresh_context = _json(locations["context"]).get("status") == "blocked"
+    if prepare and refresh_context:
         context = load_repository_context(selected, source, Path(artifacts_dir))
         atomic_json(locations["context"], context)
         if context["status"] != "ready":
