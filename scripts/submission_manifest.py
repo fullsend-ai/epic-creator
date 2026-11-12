@@ -1,0 +1,382 @@
+"""Build and validate protected Jira submission manifests.
+
+The manifest is the approval boundary between the decomposition artifacts and
+the host-side Jira submitter.  It records the approved strategy, the expected
+epic DAG, and hashes of the source artifacts that produced it.
+"""
+
+import hashlib
+import json
+import os
+import re
+import tempfile
+
+import yaml
+from artifact_utils import apply_defaults, read_frontmatter
+
+SCHEMA_VERSION = 1
+STRATEGY_ID_PATTERN = re.compile(r"^RHAISTRAT-\d+$")
+EPIC_ID_PATTERN = re.compile(r"^RHAISTRAT-\d+-E\d+$")
+BRANCH_EPIC_ID_PATTERN = re.compile(
+    r"^RHAISTRAT-\d+-BRANCH-[A-Z]-E\d+$")
+BRANCH_PATTERN = re.compile(r"^[A-Z]$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+JIRA_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
+PRIORITIES = {"Critical", "Major", "Minor"}
+
+
+class SubmissionManifestError(ValueError):
+    """A submission manifest is missing required or invalid data."""
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def approved_source_snapshot(path):
+    try:
+        data, body = read_frontmatter(path)
+    except yaml.YAMLError as error:
+        raise SubmissionManifestError(
+            f"Cannot read frontmatter from {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise SubmissionManifestError(f"Cannot read frontmatter from {path}.")
+    digest = approved_source_digest_from_snapshot(data, body)
+    return data, body, digest
+
+
+def approved_source_digest(path):
+    return approved_source_snapshot(path)[2]
+
+
+def approved_source_digest_from_snapshot(data, body):
+    """Hash the exact frontmatter/body pair already read by the caller."""
+    if not isinstance(data, dict):
+        raise SubmissionManifestError("Frontmatter snapshot must be a mapping.")
+    normalized_data = dict(data)
+    apply_defaults(normalized_data, "epic-task")
+    approved_data = dict(normalized_data)
+    approved_data.pop("jira_key", None)
+    payload = {"frontmatter": approved_data, "body": body}
+    return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+
+
+def _canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _manifest_digest(manifest):
+    return hashlib.sha256(_canonical_json(manifest).encode()).hexdigest()
+
+
+def manifest_digest(manifest):
+    """Return a stable digest for a validated manifest."""
+    return _manifest_digest(validate_manifest(manifest))
+
+
+def manifest_content_digest(manifest):
+    """Return a run-ID-independent digest for a validated manifest."""
+    payload = dict(manifest)
+    payload.pop("run_id", None)
+    payload["run_id"] = _derive_run_id(payload)
+    return _manifest_digest(validate_manifest(payload))
+
+
+def _derive_run_id(manifest):
+    payload = {key: value for key, value in manifest.items() if key != "run_id"}
+    digest = hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+    return f"{manifest['strategy_id']}-{digest[:12]}"
+
+
+def build_manifest(strategy_id, plan, review_data, review_path, branches=None):
+    """Build a submission manifest from an approved decomposition plan."""
+    if not isinstance(strategy_id, str) or not STRATEGY_ID_PATTERN.fullmatch(strategy_id):
+        raise SubmissionManifestError(f"Invalid strategy ID: {strategy_id!r}")
+    if not isinstance(review_data, dict):
+        raise SubmissionManifestError("Review data must be a mapping.")
+    if review_data.get("pass") is not True:
+        raise SubmissionManifestError("Submission requires a passing review.")
+    if not isinstance(plan, list) or not plan:
+        raise SubmissionManifestError("Submission requires at least one epic.")
+
+    epics = []
+    for entry in plan:
+        if not isinstance(entry, dict):
+            raise SubmissionManifestError("Each plan entry must be a mapping.")
+        epic_id = entry.get("epic_id")
+        title = entry.get("title")
+        priority = entry.get("priority")
+        component = entry.get("component")
+        labels = entry.get("labels", [])
+        dependencies = entry.get("dependencies", [])
+        source_path = entry.get("path")
+        source_sha256 = entry.get("source_sha256")
+        existing_jira_key = entry.get("jira_key")
+
+        if not isinstance(epic_id, str) or not EPIC_ID_PATTERN.fullmatch(epic_id):
+            raise SubmissionManifestError(f"Invalid epic ID: {epic_id!r}")
+        if not isinstance(title, str) or not title.strip():
+            raise SubmissionManifestError(f"Epic {epic_id} requires a title.")
+        if priority not in PRIORITIES:
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid priority {priority!r}.")
+        if component is not None and not isinstance(component, str):
+            raise SubmissionManifestError(f"Epic {epic_id} has an invalid component.")
+        if not isinstance(labels, list) or not all(isinstance(label, str) and label for label in labels):
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid labels.")
+        if not isinstance(dependencies, list) or not all(isinstance(dep, str) for dep in dependencies):
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid dependencies.")
+        if not isinstance(source_path, str) or not source_path:
+            raise SubmissionManifestError(f"Epic {epic_id} requires a source artifact path.")
+        if not os.path.isfile(source_path):
+            raise SubmissionManifestError(f"Epic {epic_id} source artifact not found: {source_path}")
+        if source_sha256 is None:
+            source_sha256 = approved_source_digest(source_path)
+        elif (not isinstance(source_sha256, str)
+              or not SHA256_PATTERN.fullmatch(source_sha256)):
+            raise SubmissionManifestError(f"Epic {epic_id} has an invalid source hash.")
+        epics.append({
+            "epic_id": epic_id,
+            "title": title,
+            "priority": priority,
+            "component": component,
+            "labels": list(labels),
+            "dependencies": list(dependencies),
+            "source_path": source_path,
+            "source_sha256": source_sha256,
+            "existing_jira_key": existing_jira_key,
+        })
+
+    branch_plans = []
+    if branches is None:
+        branches = {}
+    if not isinstance(branches, dict):
+        raise SubmissionManifestError("Branch plans must be a mapping.")
+    for (branch, gating_epic_id), branch_epics in sorted(branches.items()):
+        if not isinstance(branch, str) or not BRANCH_PATTERN.fullmatch(branch):
+            raise SubmissionManifestError(f"Invalid branch identifier: {branch!r}.")
+        if not isinstance(gating_epic_id, str):
+            raise SubmissionManifestError(
+                f"Branch {branch} requires a gating epic ID.")
+        if not isinstance(branch_epics, list) or not branch_epics:
+            raise SubmissionManifestError(f"Branch {branch} has no epics.")
+        for branch_epic in branch_epics:
+            path, data, _body = branch_epic[:3]
+            source_sha256 = (branch_epic[3]
+                             if len(branch_epic) > 3 else None)
+            epic_id = data.get("epic_id") if isinstance(data, dict) else None
+            if not isinstance(epic_id, str) or not BRANCH_EPIC_ID_PATTERN.fullmatch(epic_id):
+                raise SubmissionManifestError(f"Invalid branch epic ID: {epic_id!r}.")
+            if data.get("branch") != branch or data.get("gated_by") != gating_epic_id:
+                raise SubmissionManifestError(
+                    f"Branch metadata mismatch for {epic_id}.")
+            if not isinstance(path, str) or not os.path.isfile(path):
+                raise SubmissionManifestError(
+                    f"Branch epic {epic_id} source artifact not found.")
+            if source_sha256 is None:
+                source_sha256 = approved_source_digest(path)
+            elif (not isinstance(source_sha256, str)
+                  or not SHA256_PATTERN.fullmatch(source_sha256)):
+                raise SubmissionManifestError(
+                    f"Branch epic {epic_id} has an invalid source hash.")
+            branch_plans.append({
+                "branch": branch,
+                "gating_epic_id": gating_epic_id,
+                "epic_id": epic_id,
+                "source_path": path,
+                "source_sha256": source_sha256,
+                "existing_jira_key": data.get("jira_key"),
+            })
+
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "strategy_id": strategy_id,
+        "approved": True,
+        "approval": {
+            "review_path": review_path,
+            "review_score": review_data.get("score"),
+            "review_sha256": _sha256_file(review_path),
+        },
+        "epics": epics,
+        "branch_plans": branch_plans,
+        "expected_jira": {
+            "project": "RHAI",
+            "issue_type": "Epic",
+            "parent_key": strategy_id,
+        },
+    }
+    manifest["run_id"] = _derive_run_id(manifest)
+    validate_manifest(manifest)
+    return manifest
+
+
+def validate_manifest(manifest):
+    """Validate manifest structure and DAG integrity."""
+    if not isinstance(manifest, dict):
+        raise SubmissionManifestError("Manifest must be a mapping.")
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise SubmissionManifestError(f"Unsupported manifest schema version: {manifest.get('schema_version')!r}")
+    if not isinstance(manifest.get("run_id"), str) or not manifest["run_id"].strip():
+        raise SubmissionManifestError("Manifest requires a run ID.")
+    if manifest["run_id"] != _derive_run_id(manifest):
+        raise SubmissionManifestError("Manifest run ID does not match its content.")
+    strategy_id = manifest.get("strategy_id")
+    if not isinstance(strategy_id, str) or not STRATEGY_ID_PATTERN.fullmatch(strategy_id):
+        raise SubmissionManifestError(f"Invalid strategy ID: {strategy_id!r}")
+    if manifest.get("approved") is not True:
+        raise SubmissionManifestError("Manifest must be explicitly approved.")
+
+    approval = manifest.get("approval")
+    if not isinstance(approval, dict):
+        raise SubmissionManifestError("Manifest requires approval metadata.")
+    if not isinstance(approval.get("review_path"), str) or not approval["review_path"]:
+        raise SubmissionManifestError("Approval metadata requires a review path.")
+    if not isinstance(approval.get("review_score"), int):
+        raise SubmissionManifestError("Approval metadata requires an integer review score.")
+    if not isinstance(approval.get("review_sha256"), str) or not SHA256_PATTERN.fullmatch(approval["review_sha256"]):
+        raise SubmissionManifestError("Approval metadata requires a valid review hash.")
+
+    epics = manifest.get("epics")
+    if not isinstance(epics, list) or not epics:
+        raise SubmissionManifestError("Manifest requires at least one epic.")
+    epic_ids = set()
+    for epic in epics:
+        if not isinstance(epic, dict):
+            raise SubmissionManifestError("Each manifest epic must be a mapping.")
+        epic_id = epic.get("epic_id")
+        if not isinstance(epic_id, str) or not EPIC_ID_PATTERN.fullmatch(epic_id):
+            raise SubmissionManifestError(f"Invalid epic ID: {epic_id!r}")
+        if epic_id in epic_ids:
+            raise SubmissionManifestError(f"Duplicate epic ID: {epic_id}")
+        epic_ids.add(epic_id)
+        if not isinstance(epic.get("title"), str) or not epic["title"].strip():
+            raise SubmissionManifestError(f"Epic {epic_id} requires a title.")
+        if epic.get("priority") not in PRIORITIES:
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid priority.")
+        if not isinstance(epic.get("component"), (str, type(None))):
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid component.")
+        if not isinstance(epic.get("labels"), list):
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid labels.")
+        if not isinstance(epic.get("source_path"), str) or not epic["source_path"]:
+            raise SubmissionManifestError(f"Epic {epic_id} requires a source path.")
+        if not isinstance(epic.get("source_sha256"), str) or not SHA256_PATTERN.fullmatch(epic["source_sha256"]):
+            raise SubmissionManifestError(f"Epic {epic_id} has invalid source hash.")
+
+    for epic in epics:
+        dependencies = epic.get("dependencies")
+        existing_jira_key = epic.get("existing_jira_key")
+        if existing_jira_key is not None and (
+                not isinstance(existing_jira_key, str)
+                or not JIRA_KEY_PATTERN.fullmatch(existing_jira_key)):
+            raise SubmissionManifestError(
+                f"Epic {epic_id} has an invalid existing Jira key.")
+        if not isinstance(dependencies, list):
+            raise SubmissionManifestError(f"Epic {epic['epic_id']} has invalid dependencies.")
+        for dependency in dependencies:
+            if dependency not in epic_ids:
+                raise SubmissionManifestError(
+                    f"Epic {epic['epic_id']} depends on unknown epic {dependency!r}.")
+
+    _validate_acyclic(epics)
+
+    branch_plans = manifest.get("branch_plans", [])
+    if not isinstance(branch_plans, list):
+        raise SubmissionManifestError("Manifest branch plans must be a list.")
+    branch_epic_ids = set()
+    for branch_epic in branch_plans:
+        if not isinstance(branch_epic, dict):
+            raise SubmissionManifestError("Each branch plan must be a mapping.")
+        epic_id = branch_epic.get("epic_id")
+        if not isinstance(epic_id, str) or not BRANCH_EPIC_ID_PATTERN.fullmatch(epic_id):
+            raise SubmissionManifestError(f"Invalid branch epic ID: {epic_id!r}.")
+        if epic_id in branch_epic_ids:
+            raise SubmissionManifestError(f"Duplicate branch epic ID: {epic_id}.")
+        branch_epic_ids.add(epic_id)
+        if not isinstance(branch_epic.get("branch"), str) or not BRANCH_PATTERN.fullmatch(branch_epic["branch"]):
+            raise SubmissionManifestError(f"Branch epic {epic_id} has an invalid branch.")
+        if branch_epic.get("gating_epic_id") not in epic_ids:
+            raise SubmissionManifestError(
+                f"Branch epic {epic_id} has an unknown gating epic.")
+        if not isinstance(branch_epic.get("source_path"), str) or not branch_epic["source_path"]:
+            raise SubmissionManifestError(f"Branch epic {epic_id} requires a source path.")
+        if not isinstance(branch_epic.get("source_sha256"), str) or not SHA256_PATTERN.fullmatch(branch_epic["source_sha256"]):
+            raise SubmissionManifestError(f"Branch epic {epic_id} has an invalid source hash.")
+        existing_jira_key = branch_epic.get("existing_jira_key")
+        if existing_jira_key is not None and (
+                not isinstance(existing_jira_key, str)
+                or not JIRA_KEY_PATTERN.fullmatch(existing_jira_key)):
+            raise SubmissionManifestError(
+                f"Branch epic {epic_id} has an invalid existing Jira key.")
+
+    expected_jira = manifest.get("expected_jira")
+    if not isinstance(expected_jira, dict):
+        raise SubmissionManifestError("Manifest requires expected Jira fields.")
+    if expected_jira.get("project") != "RHAI":
+        raise SubmissionManifestError("Manifest must target the RHAI project.")
+    if expected_jira.get("issue_type") != "Epic":
+        raise SubmissionManifestError("Manifest must create Epic issues.")
+    if expected_jira.get("parent_key") != strategy_id:
+        raise SubmissionManifestError("Manifest parent key must match the strategy ID.")
+
+    return manifest
+
+
+def _validate_acyclic(epics):
+    dependency_map = {
+        epic["epic_id"]: set(epic.get("dependencies", []))
+        for epic in epics
+    }
+    visiting = set()
+    visited = set()
+
+    def visit(epic_id):
+        if epic_id in visited:
+            return
+        if epic_id in visiting:
+            raise SubmissionManifestError(f"Manifest dependency graph contains a cycle at {epic_id}.")
+        visiting.add(epic_id)
+        for dependency in dependency_map.get(epic_id, set()):
+            visit(dependency)
+        visiting.remove(epic_id)
+        visited.add(epic_id)
+
+    for epic_id in dependency_map:
+        visit(epic_id)
+
+
+def write_manifest(path, manifest):
+    """Persist a validated manifest atomically."""
+    validate_manifest(manifest)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f"{os.path.basename(path)}.", suffix=".tmp",
+        dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(descriptor, "w") as target:
+            yaml.safe_dump(manifest, target, sort_keys=False, allow_unicode=True)
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def read_manifest(path):
+    """Load and validate a manifest from disk."""
+    with open(path) as source:
+        try:
+            manifest = yaml.safe_load(source)
+        except yaml.YAMLError as error:
+            raise SubmissionManifestError(
+                f"Cannot read submission manifest {path}: {error}") from error
+    return validate_manifest(manifest)
+
+
+def manifest_path(artifacts_dir, strategy_id):
+    return os.path.join(artifacts_dir, "submission-manifests",
+                        f"{strategy_id}.yaml")

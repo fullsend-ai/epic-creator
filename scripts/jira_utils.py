@@ -48,6 +48,18 @@ def safe_error_message(error):
     return type(error).__name__
 
 
+def sanitize_log_message(message, max_length=500):
+    """Return a bounded, single-line message safe for CI logs."""
+    text = str(message)
+    text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text)
+    text = "".join(char if char.isprintable() else " " for char in text)
+    text = text.replace("::", "|")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_length:
+        text = text[:max_length - 1].rstrip() + "…"
+    return text
+
+
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
 
 def make_request(url, user, token, body=None, method=None):
@@ -384,7 +396,7 @@ def add_comment(server, user, token, issue_key, body_adf):
 
 def create_issue(server, user, token, project, issue_type, summary,
                  description_adf, priority, labels=None, components=None,
-                 parent_key=None, assignee_id=None):
+                 parent_key=None, assignee_id=None, retry_transient=True):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
         "fields": {
@@ -403,7 +415,10 @@ def create_issue(server, user, token, project, issue_type, summary,
         body["fields"]["parent"] = {"key": parent_key}
     if assignee_id:
         body["fields"]["assignee"] = {"accountId": assignee_id}
-    result = api_call_with_retry(server, "/issue", user, token, body=body)
+    if retry_transient:
+        result = api_call_with_retry(server, "/issue", user, token, body=body)
+    else:
+        result = api_call(server, "/issue", user, token, body=body)
     return result["key"]
 
 
