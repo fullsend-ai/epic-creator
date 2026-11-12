@@ -27,6 +27,7 @@ import difflib
 import glob
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -40,6 +41,7 @@ STATUS_VALID = "valid"
 STATUS_INVALID = "invalid"
 STATUS_FLAGGED = "needs_component"
 STATUS_CONFLICT = "conflict"
+STATUS_BAD_FLAG = "bad_flag"
 
 
 def load_components(path=COMPONENTS_PATH):
@@ -102,8 +104,14 @@ def check_component(component, needs_component, valid_components):
       invalid          component is not canonical and not flagged
       needs_component  flagged: no canonical component fits (human review)
       conflict         flagged, but the component is canonical
+      bad_flag         needs_component is present but not a bool
+
+    The component name is matched exactly, as submit.py matches it: a name
+    with stray whitespace is invalid here because submit.py would drop it.
     """
-    component = component.strip() if isinstance(component, str) else ""
+    if needs_component is not None and not isinstance(needs_component, bool):
+        return STATUS_BAD_FLAG, []
+    component = component if isinstance(component, str) else ""
     in_list = component in valid_components
     if needs_component:
         return (STATUS_CONFLICT if in_list else STATUS_FLAGGED), []
@@ -130,11 +138,12 @@ def check_strategy(artifacts_dir, strat_id, valid_components):
         data, _ = read_frontmatter(path)
         component = data.get("component")
         status, suggestions = check_component(
-            component, data.get("needs_component") is True, valid_components)
+            component, data.get("needs_component"), valid_components)
         results.append({
             "path": path,
             "epic_id": data.get("epic_id") or os.path.basename(path)[:-3],
             "component": component if isinstance(component, str) else "",
+            "needs_component": data.get("needs_component"),
             "status": status,
             "suggestions": suggestions,
         })
@@ -153,20 +162,29 @@ def format_result(result):
         if result["suggestions"]:
             names = ", ".join(repr(s) for s in result["suggestions"])
             lines.append(f"  Closest canonical names: {names}")
-            lines.append(f"  Fix: python3 scripts/frontmatter.py set {path} "
-                         f"component=\"{result['suggestions'][0]}\"")
+            lines.append("  Fix: " + shlex.join(
+                ["python3", "scripts/frontmatter.py", "set", path,
+                 f"component={result['suggestions'][0]}"]))
         else:
             lines.append("  No close canonical name found. Pick the owning "
                          "or parent-level component from the list.")
-        lines.append(f"  If no canonical component fits: "
-                     f"python3 scripts/frontmatter.py set {path} "
-                     f"needs_component=true")
+        lines.append("  If no canonical component fits: " + shlex.join(
+            ["python3", "scripts/frontmatter.py", "set", path,
+             "needs_component=true"]))
         return "\n".join(lines)
     if status == STATUS_CONFLICT:
         return (f"CONFLICT {epic_id}: needs_component=true but component "
                 f"{component!r} is canonical.\n"
-                f"  Fix: python3 scripts/frontmatter.py set {path} "
-                f"needs_component=false")
+                "  Fix: " + shlex.join(
+                    ["python3", "scripts/frontmatter.py", "set", path,
+                     "needs_component=false"]))
+    if status == STATUS_BAD_FLAG:
+        return (f"BAD FLAG {epic_id}: needs_component is "
+                f"{result['needs_component']!r}, expected true or false "
+                f"(submit.py would reject this epic).\n"
+                "  Fix: " + shlex.join(
+                    ["python3", "scripts/frontmatter.py", "set", path,
+                     "needs_component=true"]) + " or needs_component=false")
     if status == STATUS_FLAGGED:
         return (f"FLAGGED {epic_id}: needs_component=true (component "
                 f"{component!r}). Jira component will be left unset and "
@@ -193,7 +211,7 @@ def main(argv=None):
         return 0
 
     counts = {STATUS_VALID: 0, STATUS_INVALID: 0, STATUS_FLAGGED: 0,
-              STATUS_CONFLICT: 0}
+              STATUS_CONFLICT: 0, STATUS_BAD_FLAG: 0}
     for strat_id in args.strat_ids:
         for result in check_strategy(args.artifacts_dir, strat_id,
                                      valid_components):
@@ -205,8 +223,10 @@ def main(argv=None):
     print(f"Component check: {counts[STATUS_VALID]} valid, "
           f"{counts[STATUS_INVALID]} invalid, "
           f"{counts[STATUS_CONFLICT]} conflicting, "
-          f"{counts[STATUS_FLAGGED]} flagged for human review")
-    return 1 if counts[STATUS_INVALID] or counts[STATUS_CONFLICT] else 0
+          f"{counts[STATUS_FLAGGED]} flagged for human review, "
+          f"{counts[STATUS_BAD_FLAG]} with a non-bool needs_component")
+    return 1 if (counts[STATUS_INVALID] or counts[STATUS_CONFLICT]
+                 or counts[STATUS_BAD_FLAG]) else 0
 
 
 if __name__ == "__main__":

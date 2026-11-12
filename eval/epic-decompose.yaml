@@ -502,6 +502,10 @@ judges:
               v = e.get(k)
               if v is not None and v not in allowed:
                   probs.append("%s: %s %r not in %s" % (name, k, v, list(allowed)))
+          nc = e.get("needs_component")
+          if nc is not None and not isinstance(nc, bool):
+              probs.append("%s: needs_component %r is not a bool"
+                           " (submit.py rejects the epic)" % (name, nc))
           dep = e.get("dependencies")
           if dep is not None and not isinstance(dep, list):
               probs.append("%s: dependencies is %s, expected list"
@@ -1701,17 +1705,21 @@ judges:
           if not isinstance(comp, str) or not comp.strip():
               continue  # missing/unparseable component is artifact_contract's
           checked += 1
-          if epics[name].get("needs_component") is True:
+          nc = epics[name].get("needs_component")
+          if nc is not None and not isinstance(nc, bool):
+              continue  # non-bool flag is artifact_contract's
+          if nc is True:
               # Explicit "no canonical component fits": submit.py leaves the
               # component unset for human review, so it is not a vocabulary
               # failure — unless the name is canonical (contradiction).
-              if comp.strip() in valid:
+              # Names are matched exactly, as submit.py does (no strip).
+              if comp in valid:
                   bad.append("%s: needs_component is true but component %r"
                              " is canonical" % (name, comp))
               else:
                   flagged += 1
               continue
-          if comp.strip() not in valid:
+          if comp not in valid:
               bad.append("%s: component %r not in the canonical list"
                          " (submit.py would strip it)" % (name, comp))
       if bad:
