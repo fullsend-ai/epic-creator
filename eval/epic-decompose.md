@@ -113,7 +113,7 @@ are cleaned between runs):
 - `artifacts/epic-tasks/` — `{ID}-E00N.md` per epic (conditional decompositions may emit
   `{ID}-BRANCH-A-E00N.md`) with epic-task frontmatter (`epic_id`, `title`,
   `parent_strat`, `component`, `team`, `type` Implementation|Investigation, `priority`
-  P0|P1|P2, `dependencies`, optional `implementation_type`, `gated_by` +
+  P0|P1|P2, `dependencies`, optional `implementation_type`, `needs_component`, `gated_by` +
   `gate_failure_impact`, and exactly one of `ai_signals` (9 ints) /
   `investigation_signals` (5 ints)); `{ID}-E00N-ai-signals.md` rationale tables; and
   `{ID}-decomposition.md` summary (`decompose_complete`, `epic_count`,

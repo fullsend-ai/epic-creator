@@ -169,7 +169,8 @@ outputs:
       - {strat_id}-E00N.md — one file per epic (conditional decompositions may
         produce {strat_id}-BRANCH-A-E00N.md). YAML frontmatter per the epic-task
         schema: epic_id, title, parent_strat (^RHAISTRAT-\d+$), component (must be
-        a name from .context/rhai-components.txt), team, type
+        a name from .context/rhai-components.txt unless needs_component is true),
+        team, type
         (Implementation|Investigation), priority (P0|P1|P2), dependencies (list of
         sibling epic_ids), optional implementation_type (docs-authoring|
         konflux-onboarding|license-validation|repo-onboarding), gated_by,
@@ -329,7 +330,7 @@ judges:
                   "type", "implementation_type", "priority", "dependencies",
                   "ai_signals", "investigation_signals", "ai_implementability",
                   "ai_implementability_score", "jira_key", "branch",
-                  "gated_by", "gate_failure_impact"}
+                  "gated_by", "gate_failure_impact", "needs_component"}
       AI_F = ["change_specificity", "pattern_precedent", "adapter_pattern",
               "existing_foundation", "open_questions", "external_dependency",
               "human_process_gates", "repo_access", "architecture_claims"]
@@ -501,6 +502,10 @@ judges:
               v = e.get(k)
               if v is not None and v not in allowed:
                   probs.append("%s: %s %r not in %s" % (name, k, v, list(allowed)))
+          nc = e.get("needs_component")
+          if nc is not None and not isinstance(nc, bool):
+              probs.append("%s: needs_component %r is not a bool"
+                           " (submit.py rejects the epic)" % (name, nc))
           dep = e.get("dependencies")
           if dep is not None and not isinstance(dep, list):
               probs.append("%s: dependencies is %s, expected list"
@@ -1694,13 +1699,27 @@ judges:
                if "epic-tasks/" in p and epat.search(p)}
       if not epics:
           return (True, "no epic files to check (other judges cover that)")
-      bad, checked = [], 0
+      bad, checked, flagged = [], 0, 0
       for name in sorted(epics):
           comp = epics[name].get("component")
           if not isinstance(comp, str) or not comp.strip():
               continue  # missing/unparseable component is artifact_contract's
           checked += 1
-          if comp.strip() not in valid:
+          nc = epics[name].get("needs_component")
+          if nc is not None and not isinstance(nc, bool):
+              continue  # non-bool flag is artifact_contract's
+          if nc is True:
+              # Explicit "no canonical component fits": submit.py leaves the
+              # component unset for human review, so it is not a vocabulary
+              # failure — unless the name is canonical (contradiction).
+              # Names are matched exactly, as submit.py does (no strip).
+              if comp in valid:
+                  bad.append("%s: needs_component is true but component %r"
+                             " is canonical" % (name, comp))
+              else:
+                  flagged += 1
+              continue
+          if comp not in valid:
               bad.append("%s: component %r not in the canonical list"
                          " (submit.py would strip it)" % (name, comp))
       if bad:
@@ -1708,8 +1727,9 @@ judges:
                   + ("" if len(bad) <= 8 else " (+%d more)" % (len(bad) - 8)))
       if not checked:
           return (True, "no epic carries a readable component value")
-      return (True, "all %d epic components are canonical (of %d in the list)"
-              % (checked, len(valid)))
+      return (True, "all %d epic components are canonical or explicitly"
+                    " flagged (%d needs_component; %d in the list)"
+              % (checked, flagged, len(valid)))
 
   - name: decomposition_quality
     description: |

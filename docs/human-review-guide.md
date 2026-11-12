@@ -123,7 +123,7 @@ them.
 | `epic-creator-investigation` | The epic is an Investigation (vs. Implementation). |
 | `epic-creator-impl-<type>` | Implementation subtype, e.g. `epic-creator-impl-docs-authoring`. |
 | `epic-creator-ai-impl-*` | The epic's AI-implementability class — `high`, `medium`, or `low`. |
-| `epic-creator-needs-component` | The component isn't in the canonical RHAI component list yet. |
+| `epic-creator-needs-component` | No Jira component was set: either the agent found no canonical RHAI component that fits (`needs_component: true` in the attached frontmatter), or its component name wasn't canonical and was dropped. Set the component by hand. |
 
 **On the source strategy (in RHAISTRAT):**
 
