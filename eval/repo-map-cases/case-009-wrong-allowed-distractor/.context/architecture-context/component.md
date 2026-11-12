@@ -1,0 +1,1 @@
+Allowed targets: https://github.com/example/operator, https://github.com/example/dashboard. Only https://github.com/example/operator contains operator reconciliation. https://github.com/example/dashboard contains UI code only.

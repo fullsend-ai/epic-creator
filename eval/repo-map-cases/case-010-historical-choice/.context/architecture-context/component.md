@@ -1,0 +1,1 @@
+Product implementation belongs in https://github.com/example/operator. Historically a team published a logging specification in https://github.com/example/specifications, but the current requirement does not specify where to publish it and no policy establishes the target.

@@ -153,6 +153,7 @@ SCHEMAS = {
             "required": False,
             "default": None,
         },
+        "repository_warning_pending": {"type": "string", "required": False, "default": None},
         "jira_key": {
             "type": "string",
             "required": False,
@@ -189,6 +190,7 @@ SCHEMAS = {
         },
     },
     "decomp-summary": {
+        "repository_mapping_required": {"type": "bool", "required": False, "default": False},
         "parent_strat": {
             "type": "string",
             "required": True,

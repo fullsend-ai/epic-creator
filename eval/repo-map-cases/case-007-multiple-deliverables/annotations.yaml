@@ -1,0 +1,9 @@
+expected_repository: null
+expected_status: unresolved_cross_repository
+held_out: false
+provenance: authored fixture, not owner-verified production data
+rationale: Operator code must go to https://github.com/example/operator. External
+  specifications must go to https://github.com/example/specifications. Both deliverables
+  are required.
+strat_id: RHAISTRAT-9107
+tier: synthetic

@@ -157,3 +157,12 @@ Architecture context is used during decomposition to:
 - Validate component existence and dependencies
 - Determine upstream dependency maturity
 - Inform AI implementability scoring (Signal 9: architecture claims)
+
+## Repository Mapping
+
+After final Epic review, the pipeline calls [repo-map](skills/repo-map/SKILL.md)
+to select repositories using the Epic, its parent strategy and Architecture
+Context. Results are saved under `artifacts/repository-mappings/`.
+
+The publisher writes the selected URL to Jira's configured repository field,
+or leaves it empty and adds an explanatory comment when selection is uncertain.

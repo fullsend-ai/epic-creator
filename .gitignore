@@ -17,3 +17,9 @@ eval/.entity-map.yaml
 !eval/cases/*/artifacts/**
 !eval/cases/*/.context/
 !eval/cases/*/.context/**
+
+# Isolated RepoMapper evaluation fixtures.
+!eval/repo-map-cases/*/artifacts/
+!eval/repo-map-cases/*/artifacts/**
+!eval/repo-map-cases/*/.context/
+!eval/repo-map-cases/*/.context/**

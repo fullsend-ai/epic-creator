@@ -1,0 +1,8 @@
+expected_repository: https://github.com/example/dashboard
+expected_status: resolved
+held_out: false
+provenance: authored fixture, not owner-verified production data
+rationale: The component has operator code in https://github.com/example/operator
+  and UI code in https://github.com/example/dashboard.
+strat_id: RHAISTRAT-9102
+tier: synthetic

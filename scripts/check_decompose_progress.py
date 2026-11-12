@@ -17,6 +17,7 @@ from artifact_utils import read_frontmatter
 
 
 PHASE_CHECKS = {
+    "map_repositories": lambda id: f"artifacts/repository-mappings/{id}.json",
     "fetch": lambda id: f"artifacts/strat-tasks/{id}.md",
     "decompose": lambda id: f"artifacts/epic-tasks/{id}-decomposition.md",
     "review_decomp": lambda id: f"artifacts/epic-reviews/{id}-decomp-review.md",
@@ -42,6 +43,15 @@ def check_id(phase, strat_id):
     path = PHASE_CHECKS[phase](strat_id)
     if not os.path.exists(path):
         return "pending"
+    if phase == "map_repositories":
+        from pathlib import Path
+        from repository_mapping import epic_paths, input_digest, load_mapping, mapping_complete
+        ids = {p.stem for p in epic_paths(strat_id)}
+        if not mapping_complete(Path(path), ids):
+            return "pending"
+        data = load_mapping(Path(path))
+        return ("completed" if data.get("strategy_id") == strat_id
+                and data.get("input_digest") == input_digest(strat_id) else "pending")
     if phase == "decompose":
         try:
             data, _ = read_frontmatter(path)

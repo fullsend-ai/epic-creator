@@ -1,0 +1,1 @@
+Authoritative section 1 says all operator contributions go to https://github.com/example/operator. Authoritative section 2 says all operator contributions go to https://github.com/example/dashboard. Neither supersedes the other.
