@@ -22,6 +22,8 @@ execution:
 
 runner:
   type: claude-code
+  # Native epic-decomposer runner hardcodes --effort high (scripts/run-claude.sh).
+  effort: high
   # Headless runs cannot answer permission prompts; CLI allow rules are trust-independent.
   permission_mode: dontAsk
   # epic-creator is a Claude plugin (.claude-plugin/plugin.json, skills under
@@ -41,6 +43,8 @@ runner:
 
 models:
   skill: claude-opus-4-6
+  # Native epic-decomposer pins its subagent model separately (.gitlab-ci.yml).
+  subagent: claude-opus-4-6
   judge: claude-opus-4-6
   # no hook model: the skill is non-interactive (no AskUserQuestion)
 
