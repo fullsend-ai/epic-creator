@@ -22,6 +22,8 @@ execution:
 
 runner:
   type: claude-code
+  # Headless runs cannot answer permission prompts; CLI allow rules are trust-independent.
+  permission_mode: dontAsk
   # epic-creator is a Claude plugin (.claude-plugin/plugin.json, skills under
   # skills/) — without loading it via --plugin-dir, headless workspaces report
   # "Unknown command: /epic-decompose".
