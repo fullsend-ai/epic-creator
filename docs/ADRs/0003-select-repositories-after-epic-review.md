@@ -1,6 +1,5 @@
 ---
 title: "3. Select repositories after Epic review"
-status: Accepted
 relates_to:
   - repository-selection
 topics:
@@ -12,10 +11,6 @@ topics:
 # 3. Select repositories after Epic review
 
 Date: 2026-11-11
-
-## Status
-
-Accepted
 
 ## Context
 
