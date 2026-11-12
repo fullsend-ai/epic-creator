@@ -73,3 +73,11 @@ def test_rejects_malformed_ledger_entry(ledger, tmp_path):
     with pytest.raises(submission_ledger.SubmissionLedgerError):
         submission_ledger.SubmissionLedger(
             tmp_path / "ledger.json", "RHAISTRAT-1001-run", "digest")
+
+
+def test_rejects_invalid_failure_outcome(ledger):
+    ledger.begin("create:E001", "create_epic",
+                 "RHAISTRAT-1001-E001", before={"jira_key": None})
+
+    with pytest.raises(submission_ledger.SubmissionLedgerError):
+        ledger.failure("create:E001", "HTTP 429", outcome="created")

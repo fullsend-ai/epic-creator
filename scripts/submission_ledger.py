@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 LEDGER_SCHEMA_VERSION = 1
 LEDGER_STATUSES = {"in_progress", "succeeded", "failed"}
+LEDGER_OUTCOMES = {"not_created", "ambiguous"}
 
 
 class SubmissionLedgerError(RuntimeError):
@@ -126,6 +127,10 @@ class SubmissionLedger:
             if entry.get("error") is not None and not isinstance(entry.get("error"), str):
                 raise SubmissionLedgerError(
                     f"Submission ledger entry {operation_id!r} has an invalid error.")
+            outcome = entry.get("outcome")
+            if outcome is not None and outcome not in LEDGER_OUTCOMES:
+                raise SubmissionLedgerError(
+                    f"Submission ledger entry {operation_id!r} has an invalid outcome.")
         self.entries = entries
 
     def _save(self):
@@ -162,18 +167,24 @@ class SubmissionLedger:
             "status": "succeeded",
             "completed_at": _now(),
             "error": None,
+            "outcome": None,
         })
         self._save()
 
-    def failure(self, operation_id, error):
+    def failure(self, operation_id, error, outcome="ambiguous"):
         entry = self.entries.get(operation_id)
         if entry is None:
             raise SubmissionLedgerError(
                 f"Cannot fail unknown ledger operation {operation_id!r}.")
+        if outcome not in LEDGER_OUTCOMES:
+            raise SubmissionLedgerError(
+                f"Cannot fail operation {operation_id!r} with invalid outcome "
+                f"{outcome!r}.")
         entry.update({
             "status": "failed",
             "completed_at": _now(),
             "error": str(error),
+            "outcome": outcome,
         })
         self._save()
 

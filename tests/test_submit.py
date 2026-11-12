@@ -1140,6 +1140,27 @@ class TestResumeAndAbort:
 
         assert existing_manifest["run_id"] == manifest["run_id"]
 
+    def test_removed_epic_is_rejected_from_existing_submission(
+            self, tmp_dir):
+        _setup_strategy(epic_count=2)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, _ = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+        os.remove(plan[1]["path"])
+        reduced_plan = _build_plan(
+            _scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        reduced_manifest = submission_manifest.build_manifest(
+            "RHAISTRAT-9999", reduced_plan, {"pass": True, "score": 12},
+            "artifacts/epic-reviews/RHAISTRAT-9999-decomp-review.md")
+
+        with pytest.raises(submission_manifest.SubmissionManifestError) as failure:
+            submit_module._load_existing_submission(
+                "artifacts", "RHAISTRAT-9999", reduced_manifest)
+
+        assert "manifest for RHAISTRAT-9999 has changed" in str(failure.value)
+
     def test_submit_strategy_restores_ledger_key_before_preflight(
             self, tmp_dir, submission_boundaries):
         _setup_strategy(epic_count=1)
@@ -1232,6 +1253,31 @@ class TestResumeAndAbort:
         ledger.begin(operation_id, "create_epic",
                      "RHAISTRAT-9999-E001", before={"jira_key": None})
         ledger.success(operation_id, after={"jira_key": "RHAI-9002"})
+
+        with patch.object(sys, "argv",
+                          [SCRIPT, "--abort", "RHAISTRAT-9999"]):
+            submit_module.main()
+
+        output = capsys.readouterr()
+        assert "Abort requested" in output.out
+        assert "No Jira writes were made" in output.out
+        self._assert_no_writes(submission_boundaries)
+
+    def test_abort_does_not_require_current_artifacts(
+            self, tmp_dir, submission_boundaries, capsys):
+        _setup_strategy(epic_count=1)
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+        manifest, ledger = self._manifest_and_ledger(plan)
+        submission_manifest.write_manifest(
+            submission_manifest.manifest_path(
+                "artifacts", "RHAISTRAT-9999"), manifest)
+        ledger.begin("create:RHAISTRAT-9999-E001", "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.failure("create:RHAISTRAT-9999-E001", "HTTP 429",
+                       outcome="not_created")
+        os.remove("artifacts/epic-reviews/"
+                  "RHAISTRAT-9999-decomp-review.md")
+        os.remove(plan[0]["path"])
 
         with patch.object(sys, "argv",
                           [SCRIPT, "--abort", "RHAISTRAT-9999"]):
@@ -1358,7 +1404,7 @@ class TestResumeAndAbort:
         with patch.object(sys, "argv",
                           [SCRIPT, "--abort", "RHAISTRAT-9999"]), \
              patch("submit._build_current_manifest", return_value=manifest), \
-             patch("submit._load_existing_submission",
+             patch("submit._load_persisted_submission",
                    side_effect=submission_manifest.SubmissionManifestError(
                        "bad manifest\n::error::injected")), \
              pytest.raises(SystemExit) as failure:
@@ -1423,7 +1469,48 @@ class TestLedgerFailureInjection:
         assert id_map == {}
         entry = ledger.entry(operation_id)
         assert entry["status"] == "failed"
-        assert entry["error"] == "jira unavailable"
+        assert entry["error"] == "RuntimeError"
+        assert entry["outcome"] == "ambiguous"
+
+    def test_local_description_failure_is_not_recorded(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+
+        with patch("submit.markdown_to_adf",
+                   side_effect=ValueError("invalid markdown")), \
+             patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert id_map == {}
+        assert ledger.entry(operation_id) is None
+        mock_create.assert_not_called()
+
+    def test_definite_create_failure_retries_only_with_resume(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.failure(operation_id, "HTTP 429", outcome="not_created")
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger)
+
+        assert errors == 1
+        assert id_map == {}
+        mock_create.assert_not_called()
+
+        with patch("submit.create_issue", return_value="RHAI-9002"), \
+             patch("submit.markdown_to_adf", return_value={}):
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999",
+                ledger=ledger, resume=True)
+
+        assert errors == 0
+        assert id_map == {"RHAISTRAT-9999-E001": "RHAI-9002"}
+        assert ledger.entry(operation_id)["attempts"] == 2
 
     def test_ambiguous_epic_create_is_not_retried_automatically(
             self, tmp_dir):
@@ -1439,6 +1526,44 @@ class TestLedgerFailureInjection:
 
         assert errors == 1
         assert id_map == {}
+        mock_create.assert_not_called()
+
+    def test_ambiguous_epic_create_is_not_retried_with_resume(
+            self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.failure(operation_id, "response lost", outcome="ambiguous")
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999",
+                ledger=ledger, resume=True)
+
+        assert errors == 1
+        assert id_map == {}
+        mock_create.assert_not_called()
+
+    def test_validated_jira_key_reconciles_failed_create(self, tmp_dir):
+        plan, ledger = self._plan()
+        operation_id = "create:RHAISTRAT-9999-E001"
+        ledger.begin(operation_id, "create_epic",
+                     "RHAISTRAT-9999-E001", before={"jira_key": None})
+        ledger.failure(operation_id, "response lost", outcome="ambiguous")
+        _run_fm("set", plan[0]["path"], "jira_key=RHAI-9002")
+        plan = _build_plan(_scan_epics("artifacts", "RHAISTRAT-9999"), None)
+
+        with patch("submit.create_issue") as mock_create:
+            id_map, errors = _create_epics(
+                "s", "u", "t", plan, "RHAISTRAT-9999", ledger=ledger,
+                validated_keys={"RHAISTRAT-9999-E001": "RHAI-9002"})
+
+        assert errors == 0
+        assert id_map == {"RHAISTRAT-9999-E001": "RHAI-9002"}
+        entry = ledger.entry(operation_id)
+        assert entry["status"] == "succeeded"
+        assert entry["after"]["reconciled"] is True
         mock_create.assert_not_called()
 
     def test_failed_dependency_link_is_recorded(self, tmp_dir):

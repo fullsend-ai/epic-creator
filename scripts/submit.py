@@ -33,6 +33,7 @@ import http.client
 import os
 import re
 import sys
+import urllib.error
 
 import yaml
 
@@ -46,6 +47,7 @@ from artifact_utils import (
     ValidationError,
 )
 from jira_utils import (
+    JiraConfigError,
     JiraReadError,
     safe_error_message,
     require_env,
@@ -323,8 +325,23 @@ def _get_strat_assignee(server, user, token, strat_id):
         return None
 
 
+def _create_failure_outcome(error):
+    """Classify whether a protected create could have mutated Jira."""
+    if isinstance(error, JiraConfigError):
+        return "not_created"
+    if isinstance(error, urllib.error.HTTPError):
+        if 400 <= error.code < 500 and error.code != 408:
+            return "not_created"
+        return "ambiguous"
+    if isinstance(error, urllib.error.URLError):
+        if isinstance(error.reason, ConnectionRefusedError):
+            return "not_created"
+        return "ambiguous"
+    return "ambiguous"
+
+
 def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
-                  ledger=None):
+                  ledger=None, resume=False, validated_keys=None):
     """Create epic issues in Jira. Writes jira_key to frontmatter on success.
 
     Stops on first failure — already-created epics (jira_key in frontmatter)
@@ -374,13 +391,31 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
 
         recorded_entry = ledger.entry(operation_id) if ledger else None
         if recorded_entry and recorded_entry.get("status") != "succeeded":
-            print(f"  ERROR: Create operation for {epic_id} is "
-                  f"{recorded_entry.get('status')!r}; its Jira outcome is "
-                  "ambiguous. Reconcile the ledger and Jira state manually "
-                  "before retrying.", file=sys.stderr)
-            errors += 1
-            id_to_jira_key.pop(epic_id, None)
-            break
+            if (entry["jira_key"] and validated_keys
+                    and validated_keys.get(epic_id) == entry["jira_key"]):
+                ledger.success(
+                    operation_id,
+                    after={"jira_key": entry["jira_key"], "reconciled": True})
+                id_to_jira_key[epic_id] = entry["jira_key"]
+                print(f"  SKIP {entry['jira_key']} <- {epic_id} "
+                      f"(manually reconciled)")
+                continue
+            if recorded_entry.get("outcome") == "not_created":
+                if not resume:
+                    print(f"  ERROR: Create operation for {epic_id} failed "
+                          "before Jira created an issue. Retry with --resume.",
+                          file=sys.stderr)
+                    errors += 1
+                    break
+                print(f"  RETRY {epic_id} after a definite non-create failure")
+            else:
+                print(f"  ERROR: Create operation for {epic_id} is "
+                      f"{recorded_entry.get('status')!r}; its Jira outcome is "
+                      "ambiguous. Reconcile the ledger and Jira state manually "
+                      "before retrying.", file=sys.stderr)
+                errors += 1
+                id_to_jira_key.pop(epic_id, None)
+                break
 
         # Skip already-created epics (idempotent resume)
         if entry["jira_key"]:
@@ -388,16 +423,18 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
                   f"(already created)")
             continue
 
+        ledger_started = False
         try:
-            if ledger:
-                ledger.begin(operation_id, "create_epic", epic_id,
-                             before={"jira_key": None})
-            # Build description ADF
             desc_md = _build_description(entry["body"])
             desc_adf = markdown_to_adf(desc_md)
 
             # Components list (empty if no mapping)
             components = [entry["component"]] if entry["component"] else []
+
+            if ledger:
+                ledger.begin(operation_id, "create_epic", epic_id,
+                             before={"jira_key": None})
+                ledger_started = True
 
             jira_key = create_issue(
                 server, user, token,
@@ -416,9 +453,11 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None,
                 ledger.success(operation_id,
                                after={"jira_key": jira_key})
         except Exception as e:
-            if ledger:
-                ledger.failure(operation_id, e)
-            print(f"  ERROR creating {epic_id}: {e}", file=sys.stderr)
+            if ledger and ledger_started:
+                ledger.failure(operation_id, safe_error_message(e),
+                               outcome=_create_failure_outcome(e))
+            print(f"  ERROR creating {epic_id}: "
+                  f"{safe_error_message(e)}", file=sys.stderr)
             print(f"  Stopping epic creation for this strategy. "
                   f"Re-run to resume.", file=sys.stderr)
             errors += 1
@@ -824,7 +863,7 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key,
 
 def _submit_strategy(server, user, token, strat_id, plan, dry_run,
                      artifacts_dir="artifacts", ledger=None,
-                     branch_plans=None, source_hashes=None):
+                     branch_plans=None, source_hashes=None, resume=False):
     """Execute all submission phases for one strategy.
 
     Returns (created_count, error_count).
@@ -903,7 +942,8 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     print("  Phase 1: Creating epics...")
     id_to_jira_key, errors = _create_epics(server, user, token, plan,
                                            strat_id, assignee_id,
-                                           ledger=ledger)
+                                           ledger=ledger, resume=resume,
+                                           validated_keys=effective_keys)
     created = len(id_to_jira_key) - sum(
         1 for e in plan if e["jira_key"])
 
@@ -943,7 +983,7 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     return created, errors
 
 
-def _load_existing_submission(artifacts_dir, strat_id, manifest):
+def _load_persisted_submission(artifacts_dir, strat_id):
     manifest_file = manifest_path(artifacts_dir, strat_id)
     if not os.path.exists(manifest_file):
         raise SubmissionManifestError(
@@ -956,6 +996,12 @@ def _load_existing_submission(artifacts_dir, strat_id, manifest):
     ledger = SubmissionLedger(
         ledger_file, existing_manifest["run_id"],
         manifest_digest(existing_manifest))
+    return existing_manifest, ledger
+
+
+def _load_existing_submission(artifacts_dir, strat_id, manifest):
+    existing_manifest, ledger = _load_persisted_submission(
+        artifacts_dir, strat_id)
     comparison_manifest = dict(manifest)
     comparison_epics = []
     comparison_existing_manifest = dict(existing_manifest)
@@ -963,6 +1009,12 @@ def _load_existing_submission(artifacts_dir, strat_id, manifest):
     existing_epics = {
         epic["epic_id"]: epic for epic in existing_manifest.get("epics", [])
     }
+    current_epic_ids = {epic["epic_id"] for epic in manifest.get("epics", [])}
+    existing_epic_ids = set(existing_epics)
+    if current_epic_ids != existing_epic_ids:
+        raise SubmissionManifestError(
+            f"Submission manifest for {strat_id} has changed since the run "
+            "was created.")
     for epic in manifest.get("epics", []):
         comparison_epic = dict(epic)
         existing_epic = existing_epics.get(epic["epic_id"], {})
@@ -997,12 +1049,13 @@ def _build_current_manifest(strat_id, plan, review_data, review_path,
 
 
 def _run_submission(server, user, token, strat_id, plan, dry_run,
-                    artifacts_dir, manifest, ledger):
+                    artifacts_dir, manifest, ledger, resume=False):
     _print_plan(plan, strat_id, dry_run)
     return _submit_strategy(
         server, user, token, strat_id, plan, dry_run,
         artifacts_dir=artifacts_dir, ledger=ledger,
         branch_plans=manifest.get("branch_plans", []),
+        resume=resume,
         source_hashes={
             entry["epic_id"]: entry["source_sha256"]
             for entry in manifest.get("epics", [])
@@ -1071,6 +1124,21 @@ def main():
         print(f"Strategy: {strat_id}")
         print(f"{'='*60}")
 
+        if args.abort:
+            try:
+                existing_manifest, ledger = _load_persisted_submission(
+                    args.artifacts_dir, strat_id)
+            except (SubmissionManifestError, SubmissionLedgerError) as error:
+                print(f"  ERROR: Cannot abort {strat_id}: "
+                      f"{sanitize_log_message(error)}",
+                      file=sys.stderr)
+                total_errors += 1
+                continue
+            print(f"  Abort requested for run {existing_manifest['run_id']}")
+            print(f"  Ledger summary: {ledger.summary()}")
+            print("  No Jira writes were made in this attempt.")
+            continue
+
         # Check review status
         passed, review_data = _check_review_passed(args.artifacts_dir,
                                                    strat_id)
@@ -1101,20 +1169,6 @@ def main():
             print(f"  ERROR: Submission manifest invalid for {strat_id}: "
                   f"{sanitize_log_message(error)}", file=sys.stderr)
             total_errors += 1
-            continue
-        if args.abort:
-            try:
-                existing_manifest, ledger = _load_existing_submission(
-                    args.artifacts_dir, strat_id, manifest)
-            except (SubmissionManifestError, SubmissionLedgerError) as error:
-                print(f"  ERROR: Cannot abort {strat_id}: "
-                      f"{sanitize_log_message(error)}",
-                      file=sys.stderr)
-                total_errors += 1
-                continue
-            print(f"  Abort requested for run {existing_manifest['run_id']}")
-            print(f"  Ledger summary: {ledger.summary()}")
-            print("  No Jira writes were made in this attempt.")
             continue
         if args.dry_run:
             _print_plan(plan, strat_id, args.dry_run)
@@ -1155,7 +1209,8 @@ def main():
                         args.artifacts_dir, strat_id, manifest)
                     created, errors = _run_submission(
                         server, user, token, strat_id, plan, args.dry_run,
-                        args.artifacts_dir, manifest, ledger)
+                        args.artifacts_dir, manifest, ledger,
+                        resume=args.resume)
                 else:
                     digest = manifest_digest(manifest)
                     write_manifest(manifest_path(args.artifacts_dir, strat_id),
@@ -1165,7 +1220,8 @@ def main():
                         manifest["run_id"], digest)
                     created, errors = _run_submission(
                         server, user, token, strat_id, plan, args.dry_run,
-                        args.artifacts_dir, manifest, ledger)
+                        args.artifacts_dir, manifest, ledger,
+                        resume=args.resume)
                 total_created += created
                 total_errors += errors
         except (SubmissionManifestError, SubmissionLedgerError,
