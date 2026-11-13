@@ -9,6 +9,9 @@ import argparse
 import os
 import sys
 import time
+import json
+from pathlib import Path
+from pipeline_status import read_status
 
 import yaml
 
@@ -17,6 +20,7 @@ from artifact_utils import read_frontmatter
 
 
 PHASE_CHECKS = {
+    "plan_repositories": lambda id: f"artifacts/repository-plans/{id}.json",
     "fetch": lambda id: f"artifacts/strat-tasks/{id}.md",
     "decompose": lambda id: f"artifacts/epic-tasks/{id}-decomposition.md",
     "review_decomp": lambda id: f"artifacts/epic-reviews/{id}-decomp-review.md",
@@ -39,9 +43,21 @@ def _decompose_complete(strat_id, data):
 
 def check_id(phase, strat_id):
     """Check one ID. Returns 'completed', 'pending', or 'error'."""
+    status = read_status(strat_id)
+    if status is not None:
+        return "error" if status["status"] == "invalid" else "completed"
     path = PHASE_CHECKS[phase](strat_id)
     if not os.path.exists(path):
         return "pending"
+    if phase == "plan_repositories":
+        try:
+            data = json.loads(Path(path).read_text())
+            context = json.loads(Path(f"artifacts/repository-plans/{strat_id}-context.json").read_text())
+        except (OSError, ValueError):
+            return "pending"
+        if data.get("complete") is not True or data.get("mapping_snapshot_digest") != context.get("digest"):
+            return "pending"
+        return "completed" if data.get("ready_for_drafting") is True else "error"
     if phase == "decompose":
         try:
             data, _ = read_frontmatter(path)

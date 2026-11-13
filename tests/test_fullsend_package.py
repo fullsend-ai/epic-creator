@@ -510,7 +510,10 @@ def _hook_checkout(tmp_path):
     checkout = tmp_path / "checkout"
     scripts = checkout / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/pipeline_state.py", scripts / "pipeline_state.py")
+    for name in ("pipeline_state.py", "pipeline_repositories.py", "pipeline_status.py",
+                 "rhai_config.py", "artifact_utils.py", "repository_sources.py"):
+        shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    shutil.copytree(ROOT / "config", checkout / "config")
     state = checkout / "tmp/pipeline-state.yaml"
     state.parent.mkdir()
     state.write_text("phase: DECOMPOSE\n")
@@ -581,3 +584,18 @@ def test_project_hook_does_not_duplicate_plugin_hook(tmp_path):
     assert plugin_result.returncode == 0, plugin_result.stderr
     assert plugin_result.stderr == ""
     assert "DECOMPOSE" in plugin_result.stdout
+
+
+def test_validator_rejects_invalid_pipeline_status_despite_completed_result(tmp_path):
+    iteration = tmp_path / "iteration"
+    _, repo = _fixture(iteration)
+    from pipeline_status import write_status
+    previous = Path.cwd()
+    try:
+        os.chdir(repo)
+        write_status("RHAISTRAT-9001", "invalid", "revise_decomp", "Epic dependencies conflict with repository scope plan")
+    finally:
+        os.chdir(previous)
+    result = _run_validator(iteration, repo)
+    assert result.returncode != 0
+    assert "Epic dependencies conflict" in result.stdout

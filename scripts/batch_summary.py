@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
+from pipeline_status import read_status
 
 
 def main():
@@ -33,8 +34,14 @@ def main():
             if data:
                 total_epics += data.get("epic_count", 0)
 
-        if os.path.exists(review):
-            reviewed += 1
+        has_review = os.path.exists(review)
+        reviewed += int(has_review)
+        terminal = read_status(strat_id)
+        if terminal:
+            errors += int(terminal["status"] == "invalid")
+            continue
+
+        if has_review:
             data, _ = read_frontmatter(review)
             if data:
                 if data.get("error"):

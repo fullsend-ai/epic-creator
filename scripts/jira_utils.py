@@ -303,7 +303,7 @@ def download_attachment(url, user, token, server=None, max_bytes=1_048_576):
     raise last_error
 
 
-def add_attachment(server, user, token, issue_key, filename, content):
+def add_attachment(server, user, token, issue_key, filename, content, *, retry=True):
     """Attach a file to a Jira issue.
 
     Uses multipart/form-data upload (the Jira attachments API does not
@@ -330,11 +330,13 @@ def add_attachment(server, user, token, issue_key, filename, content):
         "X-Atlassian-Token": "no-check",
     })
     last_error = None
-    for attempt in range(3):
+    for attempt in range(3 if retry else 1):
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
+            if not retry:
+                raise
             if e.code == 429:
                 retry_after = int(e.headers.get("Retry-After", 1))
                 wait = max(retry_after, 1)
@@ -352,6 +354,8 @@ def add_attachment(server, user, token, issue_key, filename, content):
             time.sleep(wait)
             last_error = e
         except urllib.error.URLError as e:
+            if not retry:
+                raise
             wait = 4 ** attempt
             print(f"  Attachment upload error: {e}, retrying in {wait}s...",
                   file=sys.stderr)
@@ -384,7 +388,7 @@ def add_comment(server, user, token, issue_key, body_adf):
 
 def create_issue(server, user, token, project, issue_type, summary,
                  description_adf, priority, labels=None, components=None,
-                 parent_key=None, assignee_id=None):
+                 parent_key=None, assignee_id=None, *, retry=True, custom_fields=None):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
         "fields": {
@@ -403,7 +407,12 @@ def create_issue(server, user, token, project, issue_type, summary,
         body["fields"]["parent"] = {"key": parent_key}
     if assignee_id:
         body["fields"]["assignee"] = {"accountId": assignee_id}
-    result = api_call_with_retry(server, "/issue", user, token, body=body)
+    if custom_fields:
+        if any(re.fullmatch(r"customfield_\d+", key) is None for key in custom_fields):
+            raise ValueError("Custom fields must use Jira customfield IDs")
+        body["fields"].update(custom_fields)
+    call = api_call_with_retry if retry else api_call
+    result = call(server, "/issue", user, token, body=body)
     return result["key"]
 
 
