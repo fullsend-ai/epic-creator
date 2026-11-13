@@ -1,3 +1,2 @@
 case-009-triage-trivial-rename
-case-020-hardware-dependent-investigation
-case-022-real-kueue-scheduling-visibility-ui
+case-030-real-operator-structured-logging
