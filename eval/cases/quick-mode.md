@@ -9,7 +9,7 @@ The selected cases cover distinct core paths while keeping the run short:
 - **009:** triage a strategy that does not need decomposition.
 - **030:** decompose a real operator logging strategy using SME input.
 
-This quick mode solution is temporary and will likely be replaced by [AISDLC-734](https://redhat.atlassian.net/browse/AISDLC-734).
+This quick mode solution is temporary and will likely be replaced by a more general quick-mode mechanism.
 
 Each line is a full case directory name in this directory. Keep the file to
 bare names, one per line, so readers can consume it without parsing.
