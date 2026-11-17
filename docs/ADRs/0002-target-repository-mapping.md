@@ -1,6 +1,6 @@
 ---
 title: 'Assign one target repository to each implementation epic'
-status: Proposed
+status: Accepted
 topics:
   - workloads
   - jira
@@ -11,11 +11,11 @@ topics:
 # ADR-0002: Assign one target repository to each implementation epic
 
 Date: 2026-10-22
-Updated: 2026-11-11
+Updated: 2026-11-17
 
 ## Status
 
-Proposed.
+Accepted. Confirmed at the RHAI Tech Review Forum on 2026-11-17.
 
 ## Context
 
@@ -164,6 +164,26 @@ download evidence attachments or repeat inventory, revision or digest validation
   replanning carries those findings forward into a new drafting and review pass.
 - Publication provides a canonical repository URL or an explicit unresolved
   result. Adoption of that field by coding automation is separate work.
+
+## Evaluation test candidates
+
+The following Jira tickets were identified as evaluation cases for repository
+mapping. Each exercises a distinct mapping challenge. All proposed results are
+unresolved pending source/inventory approval and contribution policy
+confirmation.
+
+| Ticket | Component(s) | Coverage |
+| --- | --- | --- |
+| RHAI-180 | AI Core Dashboard | One-to-many component mapping; wrong approved repository |
+| RHAI-372 | Feature Store | Fork identity; many epics per component |
+| RHAI-373 | Feature Store | Component boundary; conditional cross-repository |
+| RHAI-411 | AI Core Platform | One-to-many component; cross-repository split candidate |
+| RHAI-349 | llm-d | Repository rename; release scope; conditional cross-repository |
+| RHOAIENG-95815 | 18 components | Multi-component; inventory gap; explicit Jira target |
+| RHOAIENG-93736 | Feature Store | Repository boundary; cross-repository split candidate |
+| RHOAIENG-101161 | Feature Store | Supplementary bug; source version gap; wrong similar repository |
+
+Source: `evaluation-candidates.json` in the AISDLC-546 workbench folder.
 
 ## References
 
