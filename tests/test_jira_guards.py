@@ -1,4 +1,4 @@
-"""Regression tests for Jira reads that authorize epic decomposition."""
+"""Regression tests for Jira API request guards."""
 
 import base64
 import errno
@@ -16,8 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from jira_utils import (JiraReadError, has_existing_epics, search_issues_page,
-                        verify_jira_auth)
+from jira_utils import (JiraReadError, create_issue, has_existing_epics,
+                        search_issues_page, verify_jira_auth)
 
 
 SERVER = "https://jira.example.com"
@@ -46,6 +46,41 @@ def _response(payload):
 
 def _strategy(links=None):
     return {"key": STRAT, "fields": {"issuelinks": links or []}}
+
+
+class TestCreateIssue:
+    def test_epic_create_without_transient_retry_still_retries_rate_limits(self):
+        rate_limit = urllib.error.HTTPError(
+            f"{SERVER}/rest/api/3/issue", 429, "Too Many Requests",
+            {"Retry-After": "1"}, io.BytesIO(b""),
+        )
+        with patch("jira_utils.api_call",
+                   side_effect=[rate_limit, {"key": CHILD}]) as request, \
+             patch("jira_utils.time.sleep") as sleep:
+            assert create_issue(
+                SERVER, USER, TOKEN, "RHAI", "Epic", "Protected create",
+                {}, "Major", retry_ambiguous=False) == CHILD
+
+        assert request.call_count == 2
+        sleep.assert_called_once_with(1)
+
+    @pytest.mark.parametrize("failure", [
+        urllib.error.HTTPError(
+            f"{SERVER}/rest/api/3/issue", 502, "Bad Gateway", {}, io.BytesIO(b"")
+        ),
+        urllib.error.URLError("temporary network failure"),
+    ])
+    def test_epic_create_without_transient_retry_skips_ambiguous_retries(
+            self, failure):
+        with patch("jira_utils.api_call", side_effect=failure) as request, \
+             patch("jira_utils.time.sleep") as sleep:
+            with pytest.raises(type(failure)):
+                create_issue(
+                    SERVER, USER, TOKEN, "RHAI", "Epic", "Protected create",
+                    {}, "Major", retry_ambiguous=False)
+
+        assert request.call_count == 1
+        sleep.assert_not_called()
 
 
 class TestVerifyJiraAuth:
