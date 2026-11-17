@@ -124,7 +124,7 @@ def _validate_server_url(server):
 def require_env():
     """Read and validate Jira env vars. Returns (server, user, token)."""
     server = os.environ.get("JIRA_SERVER")
-    user = os.environ.get("JIRA_USER")
+    user = os.environ.get("JIRA_USER") or os.environ.get("JIRA_USERNAME")
     token = os.environ.get("JIRA_TOKEN")
     if server:
         server = _validate_server_url(server)

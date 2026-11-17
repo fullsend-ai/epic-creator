@@ -92,6 +92,7 @@ def _snapshot(source, repository, cache, commit):
             if Path(name).suffix.lower() not in (".md", ".markdown", ".yaml", ".yml", ".json", ".txt"):
                 continue
             content = _git(repository, "show", f"{commit}:{name}", binary=True)
+            content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
             dest = cache / "content" / commit / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)

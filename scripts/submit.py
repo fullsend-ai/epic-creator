@@ -730,7 +730,10 @@ def main():
     repository_mode = bool(selected.repository_policy)
     # Disabling the policy cannot route repository-bound drafts through legacy submission.
     if not repository_mode:
+        submitted_prefixes = tuple(f"{sid}-" for sid in args.strat_ids) if args.strat_ids else ()
         for path in Path(args.artifacts_dir).glob("epic-tasks/*.md"):
+            if submitted_prefixes and not any(path.name.startswith(p) for p in submitted_prefixes):
+                continue
             data, _ = read_frontmatter(str(path))
             if data.get("rhai_config_digest") or data.get("mapping_snapshot_digest"):
                 print("Error: repository-bound artifacts require enabled repository mode", file=sys.stderr)

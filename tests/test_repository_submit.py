@@ -199,6 +199,7 @@ def test_verify_jira_table_normalization(publication, change):
               "labels": [entry["identity"], entry["fingerprint"]], "parent": {"key": source.stem},
               entry["repo_url_field"]: entry["repo_url"], "summary": entry["desired"]["summary"],
               "components": [{"name": name} for name in entry["desired"]["components"]],
+              "priority": {"name": entry["desired"]["priority"]},
               "description": deepcopy(desired)}
     cell = fields["description"]["content"][0]["content"][0]["content"][0]
     cell["attrs"] = {}

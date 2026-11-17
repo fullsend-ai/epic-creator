@@ -71,7 +71,7 @@
         "allOf": [
           {
             "if": {"properties": {"kind": {"const": "implementation"}}},
-            "then": {"required": ["planned_pr"]},
+            "then": {"required": ["planned_pr", "resolution"]},
             "else": {"not": {"required": ["planned_pr"]}}
           }
         ],

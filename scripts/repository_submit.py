@@ -207,6 +207,8 @@ def _verify_issue(entry, issue, source):
                 or _normalize_adf(fields.get("description")) != _normalize_adf(desired["description_adf"])
                 or sorted(c["name"] for c in fields.get("components", [])) != sorted(desired["components"])):
             raise RepositoryError(f"{issue['key']}: published repository scope differs from reviewed plan")
+        if fields.get("priority", {}).get("name") != desired["priority"]:
+            raise RepositoryError(f"{issue['key']}: priority changed after creation; reconcile explicitly")
 
 
 def _resolve(entry, record, source, credentials):
@@ -232,7 +234,7 @@ def _resolve(entry, record, source, credentials):
         raise RepositoryError(f"{entry['epic_id']}: conflicting Jira keys; reconcile duplicates manually")
     if keys:
         key = keys.pop()
-        issue = jira.get_issue(*credentials, key, fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", entry["repo_url_field"]])
+        issue = jira.get_issue(*credentials, key, fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", "priority", entry["repo_url_field"]])
         _verify_issue(entry, issue, source)
         return key
     if record:
@@ -291,6 +293,10 @@ def publication(submission, root, credentials):
         entry["custom_fields"] = {field_id: entry["repo_url"]} if entry["repo_url"] else {}
     with _journal(root, key, credentials[0]) as (path, journal):
         source = _source_issue(selected, submission, credentials)
+        if not any(entry["jira_key"] for entry in plan) and not journal["epics"]:
+            strategy = jira.get_issue(*credentials, key, fields=["issuelinks"])
+            if jira.has_existing_epics(strategy, *credentials):
+                raise RepositoryError(f"{key}: strategy already has linked epics")
         if set(journal["epics"]) - {entry["epic_id"] for entry in plan}:
             raise RepositoryError(f"{key}: journal contains epics absent from reviewed plan")
         resolved = {entry["epic_id"]: _resolve(entry, journal["epics"].get(entry["epic_id"]), key, credentials)
@@ -329,7 +335,7 @@ def publication(submission, root, credentials):
                 raise RepositoryError(f"{eid}: Jira returned an invalid created key")
             _save_journal(path, journal)
             issue = jira.get_issue(*credentials, record["jira_key"],
-                fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", entry["repo_url_field"]])
+                fields=["project", "issuetype", "labels", "parent", "summary", "description", "components", "priority", entry["repo_url_field"]])
             _verify_issue(entry, issue, key)
             warn(entry, record["jira_key"])
             return record["jira_key"]

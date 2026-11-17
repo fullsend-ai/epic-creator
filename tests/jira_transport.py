@@ -10,7 +10,7 @@ import shutil
 import socket
 import sys
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 class Response(io.BytesIO):
@@ -65,10 +65,26 @@ class Jira:
         if method == "GET" and path.startswith("/issue/"):
             return deepcopy(self.issues[path.split("/")[2]])
         if path == "/search/jql":
-            body = json.loads(request.data)
-            marker = re.search(r'labels = "([^"]+)"', body["jql"]).group(1)
-            issues = [deepcopy(i) for i in self.issues.values()
-                      if marker in i["fields"].get("labels", [])]
+            if request.data:
+                body = json.loads(request.data)
+                jql = body["jql"]
+            else:
+                jql = parse_qs(urlparse(request.full_url).query).get("jql", [""])[0]
+            label_match = re.search(r'labels = "([^"]+)"', jql)
+            if label_match:
+                marker = label_match.group(1)
+                issues = [deepcopy(i) for i in self.issues.values()
+                          if marker in i["fields"].get("labels", [])]
+            else:
+                key_match = re.search(r'key = (\S+)', jql)
+                parent_match = re.search(r'parent = (\S+)', jql)
+                matched = []
+                for i in self.issues.values():
+                    if key_match and i["key"] == key_match.group(1):
+                        matched.append(deepcopy(i))
+                    elif parent_match and (i["fields"].get("parent") or {}).get("key") == parent_match.group(1):
+                        matched.append(deepcopy(i))
+                issues = matched
             result = {"issues": [] if self.hidden else issues, "isLast": True}
             if self.incomplete:
                 result.update(isLast=False, nextPageToken="more")
