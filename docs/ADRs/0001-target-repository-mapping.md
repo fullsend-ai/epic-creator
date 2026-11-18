@@ -1,6 +1,8 @@
 ---
 title: 'Assign one target repository to each implementation epic'
-status: Proposed
+status: Accepted
+relates_to:
+  - "*"
 topics:
   - workloads
   - jira
@@ -8,15 +10,14 @@ topics:
   - provenance
 ---
 
-# ADR-0002: Assign one target repository to each implementation epic
+# ADR-0001: Assign one target repository to each implementation epic
 
 Date: 2026-10-22
 Updated: 2026-11-18
 
 ## Status
 
-Proposed. The RHAI Tech Review Forum endorsed the approach on 2026-11-17;
-acceptance follows PR review and merge.
+Accepted
 
 ## Context
 
@@ -152,6 +153,20 @@ still stop submission; they must not be treated as ordinary unresolved assignmen
 These checks belong to Epic Creator. This decision does not require Fullsend to
 download evidence attachments or repeat inventory, revision or digest validation.
 
+## Alternatives considered
+
+A post-hoc repository mapper — a sub-agent that assigns repositories after
+Epics are drafted and reviewed, leaving existing Epic scope, body and
+dependencies untouched — was evaluated as a smaller, lower-risk change
+([PR #62](https://github.com/fullsend-ai/epic-creator/pull/62)). At the RHAI
+Tech Review Forum on 2026-11-17 the group preferred planning repositories
+before drafting: the planning context is already loaded, PR-sized Epics keep
+reviewable boundaries, and current output too often produces a single Epic
+whose acceptance criteria span multiple repositories. The original motivation
+for the smaller alternative — no way to test a larger change safely — is
+addressed by the evaluation harness and the captured real-strategy test
+corpus.
+
 ## Consequences
 
 - Epic boundaries align with reviewable PRs and a single contribution repository,
@@ -165,6 +180,32 @@ download evidence attachments or repeat inventory, revision or digest validation
   replanning carries those findings forward into a new drafting and review pass.
 - Publication provides a canonical repository URL or an explicit unresolved
   result. Adoption of that field by coding automation is separate work.
+
+## Discussion outcomes and future work
+
+Recorded from the RHAI Tech Review Forum on 2026-11-17. None of these block
+this decision.
+
+- **Rollout mechanism.** Repository mode ships behind a feature flag that
+  defaults to off. GitLab CI variables are the rollout mechanism: branch
+  protection in the target repositories prevents staging branches, so the
+  available granularity is a default value for scheduled pipelines plus
+  ad-hoc overrides for targeted dry runs.
+- **Architecture-context scalability.** Curated architecture context is
+  operationally expensive to maintain at scale — every release, product and
+  component, potentially across hundreds of repositories — and can drift
+  from repository state between planning and implementation. The agreed
+  direction is a pluggable context interface: replace hardcoded references
+  to a specific architecture-context repository with a skill contract, so a
+  workload can supply context from a curated snapshot, live repository
+  inspection or another store behind the same interface. What the platform
+  owns versus what workloads supply remains open.
+- **Configuration placement.** The RHAI repository-mapping configuration
+  cannot live indefinitely inside Epic Creator; moving it toward the
+  architecture-context repository keeps Epic Creator workload-agnostic.
+- **Configuration experience.** Epic Creator is configured through files
+  while other fullsend agents read environment variables; the two models
+  need reconciling into a single user-facing configuration experience.
 
 ## Evaluation test candidates
 
@@ -212,10 +253,10 @@ the human-correction warning, matching the decision above. The full regression
 suite passed locally: 594 tests, with ten pre-existing end-to-end errors caused
 by a missing `openssl` binary on the test machine rather than the code.
 
-Limits: the evaluation workers ran on GLM 5.3 (a free hosted model) rather than
-the frontier model used by earlier baselines, because no model budget remained;
-review scores are therefore not quality-comparable with those baselines, and
-this run validates pipeline mechanics of the fixed code. The contribution
+Limits: the evaluation workers ran on GLM 5.3 rather than the frontier model
+used by earlier baselines; review scores are therefore not quality-comparable
+with those baselines, and this run validates pipeline mechanics of the fixed
+code. The contribution
 inventory is provisional fixture configuration; production contribution
 approval and the per-case owner review remain outstanding. No Jira issues,
 URL fields or comments were created in this evaluation. Full artifacts:
