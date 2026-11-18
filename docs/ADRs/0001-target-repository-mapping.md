@@ -279,8 +279,18 @@ validated pipeline mechanics independently of the Fullsend runtime: all six
 dispatchers reached DONE, all six automated reviews passed, and every resolved
 assignment (30 of 30) carried verbatim evidence citations including an
 authoritative contribution-inventory citation. The full regression suite
-passed locally: 598 tests, with ten pre-existing end-to-end errors caused by
-a missing `openssl` binary on the test machine rather than the code.
+passed locally: 628 tests after integrating upstream main (the merge adopted
+main's finer-grained create-retry semantics and revised-subset re-review
+design alongside this PR's URL-field publication).
+
+### Flag-off verification
+
+A legacy-mode run with repository planning disabled (the production default,
+`enabled: false`) decomposed the same captured strategy on the merged head:
+the dispatcher reached DONE, the automated review passed, and the run
+produced no repository artifacts at all — no repository plans, no
+repository source snapshots, no `target_repository` metadata and no
+repository warnings. Legacy behavior is unchanged when the feature is off.
 
 Limits: neither run exercises Jira publication — the URL-field contract and
 warning comments are covered by unit and local HTTPS fixture tests only. The
