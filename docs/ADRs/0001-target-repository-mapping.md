@@ -197,10 +197,12 @@ Recorded from the RHAI Tech Review Forum on 2026-11-17. None of these block
 this decision.
 
 - **Rollout mechanism.** Repository mode ships behind a feature flag that
-  defaults to off. GitLab CI variables are the rollout mechanism: branch
-  protection in the target repositories prevents staging branches, so the
-  available granularity is a default value for scheduled pipelines plus
-  ad-hoc overrides for targeted dry runs.
+  defaults to off; today the switch is the `enabled` key in the workload's
+  repository configuration. The agreed future direction from the forum is to
+  drive such flags through GitLab CI variables: branch protection in the
+  target repositories prevents staging branches, so the available granularity
+  would be a default value for scheduled pipelines plus ad-hoc overrides for
+  targeted dry runs.
 - **Architecture-context scalability.** Curated architecture context is
   operationally expensive to maintain at scale — every release, product and
   component, potentially across hundreds of repositories — and can drift
