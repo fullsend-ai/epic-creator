@@ -2,7 +2,7 @@
 
 This configuration extends the current RHAISTRAT → RHAI workflow. It does not
 require workload descriptors or PR #40. The architectural decision is tracked in
-[proposed ADR 0002](https://github.com/fullsend-ai/epic-creator/pull/45).
+[ADR 0001](https://github.com/fullsend-ai/epic-creator/pull/45).
 
 ## Configure the RHAI sources
 
