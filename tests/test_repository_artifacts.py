@@ -135,6 +135,7 @@ def test_revision_content_change_forces_rereview_despite_false_flag(monkeypatch,
     write_artifact(review_path, review, "decomp-review", body="Reviewed all seven criteria\n")
     path = Path(f"artifacts/epic-tasks/{epic_metadata(plan)[0]['epic_id']}.md")
     path.write_text(path.read_text() + "\nNew scope\n")
+    pipeline_state._write_ids("tmp/pipeline-revise-ids.txt", [source.stem])
     state = pipeline_state._load_state()
     state["phase"] = "RE_REVIEW_CHECK"
     next_phase, _ = pipeline_state.advance(state)
@@ -197,6 +198,7 @@ def test_drafter_validation_checks_epics_as_well_as_plan(monkeypatch, tmp_path, 
 def test_revision_check_reports_broken_repository_binding(monkeypatch, tmp_path, capsys):
     import pipeline_state
     source, _, _, _ = reviewed_decomposition(monkeypatch, tmp_path, capsys)
+    pipeline_state._write_ids("tmp/pipeline-revise-ids.txt", [source.stem])
     state = pipeline_state._load_state()
     state["phase"] = "RE_REVIEW_CHECK"
     repository_plan.paths("artifacts", source.stem)["plan"].unlink()
@@ -251,6 +253,7 @@ def test_dependency_revision_preserves_repository_scopes_and_forces_review(monke
         pipeline_repositories.validate_artifact(pipeline_state._load_state(), source.stem,
                                                review_path, "decomp-review")
     artifacts.update_frontmatter(f"artifacts/epic-tasks/{source.stem}-decomposition.md", {"revised": False}, "decomp-summary")
+    pipeline_state._write_ids("tmp/pipeline-revise-ids.txt", [source.stem])
     state = pipeline_state._load_state()
     state["phase"] = "REVISE_DECOMP"
     pipeline_state._save_state(state)

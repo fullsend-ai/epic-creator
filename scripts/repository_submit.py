@@ -325,7 +325,7 @@ def publication(submission, root, credentials):
             journal["epics"][eid] = record
             _save_journal(path, journal)
             try:
-                record["jira_key"] = jira.create_issue(*credentials, **fields, retry_ambiguous=False)
+                record["jira_key"] = jira.create_issue(*credentials, **fields)
             except urllib.error.HTTPError as exc:
                 if 400 <= exc.code < 500:
                     journal["epics"].pop(eid, None)
