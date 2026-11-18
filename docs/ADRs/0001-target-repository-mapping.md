@@ -260,17 +260,19 @@ eval harness (placeholder credentials, no Atlassian egress).
 | --- | ---: | --- | --- |
 | RHAISTRAT-1413 | 3 | pass, 14/14 | Resolved to `opendatahub-io/data-science-pipelines` |
 | RHAISTRAT-1631 | 5 | revise requested, 12/14 | One priority-mapping finding; repositories resolved across eval-hub, trustyai-service-operator and odh-dashboard |
-| RHAISTRAT-2155 | — | not accepted | The evidence-integrity check rejected the run: pinned source content changed between drafting and review. Drafting and review had completed (14/14) but the result was correctly refused |
+| RHAISTRAT-2155 | 9 | pass, 14/14 (on retry) | First attempt rejected by the evidence-integrity check: pinned source content changed between drafting and review. A retry on identical code and inputs passed cleanly — resolved across three repositories, one documentation target left unresolved with warning |
 | RHAISTRAT-2369 | 5 | pass, 14/14 | Resolved to `opendatahub-io/odh-dashboard`; documentation destination left unresolved with warning |
 | RHAISTRAT-2649 | 3 | pass, 14/14 | Resolved across the gateway, MaaS and operator repositories |
 | RHAISTRAT-3069 | 5 | pass, 14/14 | Two work items left unresolved with warnings — the planned service repository does not exist in the inventory |
 
-Four of six accepted with passing reviews; one accepted with revision
-findings; one rejected by the integrity check. Every resolved repository was
-verified against the live GitHub repository (exists, actively maintained,
-structure matches the planned work). Unresolved destinations kept their
-reasons and the human-correction warning. The RHAISTRAT-2155 rejection is
-under root-cause investigation with the sandbox preserved.
+Five of six accepted with passing reviews (one on retry); one accepted with
+revision findings. Every resolved repository was verified against the live
+GitHub repository (exists, actively maintained, structure matches the
+planned work). Unresolved destinations kept their reasons and the
+human-correction warning. The RHAISTRAT-2155 first-attempt rejection did not
+reproduce on retry under identical conditions; the integrity check refused a
+result built on drifted evidence exactly as designed, and the retry confirmed
+the pipeline itself is sound.
 
 ### Local dispatcher run (supplementary)
 
