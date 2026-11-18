@@ -95,9 +95,9 @@ inventory while using the same planner. Source definitions declare ownership,
 authoritative or supporting roles, Git locations, revisions and relevant
 paths. Project-specific mapping rules belong in workload data.
 
-Do not add the [product/upstream mapping project](https://gitlab.cee.redhat.com/ospodata/mapping)
-as a direct input to Epic Creator for the current RHAI scope. For broader adoption,
-its repository-discovery data may help populate platform definitions and generate
+Do not add the internal product/upstream mapping project as a direct input to
+Epic Creator for the current RHAI scope. For broader adoption, its
+repository-discovery data may help populate platform definitions and generate
 Architecture Context. That is a future integration, not a dependency of this
 Epic Creator decision.
 
@@ -238,7 +238,8 @@ confirmation.
 | RHOAIENG-93736 | Feature Store | Repository boundary; cross-repository split candidate |
 | RHOAIENG-101161 | Feature Store | Supplementary bug; source version gap; wrong similar repository |
 
-Source: `evaluation-candidates.json` in the AISDLC-546 workbench folder.
+Source: the evaluation-candidates bundle captured from Jira on 2026-11-03
+during the repository-source verification work.
 
 ## Evaluation results
 
@@ -269,11 +270,11 @@ by a missing `openssl` binary on the test machine rather than the code.
 Limits: the evaluation workers ran on GLM 5.3 rather than the frontier model
 used by earlier baselines; review scores are therefore not quality-comparable
 with those baselines, and this run validates pipeline mechanics of the fixed
-code. The contribution
-inventory is provisional fixture configuration; production contribution
-approval and the per-case owner review remain outstanding. No Jira issues,
-URL fields or comments were created in this evaluation. Full artifacts:
-`test-results/b4eb278-2026-11-18` in the AISDLC-546 workbench folder.
+code. The contribution inventory is provisional fixture configuration;
+production contribution approval and the per-case owner review remain
+outstanding. No Jira issues, URL fields or comments were created in this
+evaluation. Full artifacts are preserved with the captured test-data bundle
+from the same evaluation series.
 
 ## References
 
