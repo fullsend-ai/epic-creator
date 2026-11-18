@@ -11,7 +11,7 @@ topics:
 # ADR-0002: Assign one target repository to each implementation epic
 
 Date: 2026-10-22
-Updated: 2026-11-17
+Updated: 2026-11-18
 
 ## Status
 
@@ -184,6 +184,41 @@ confirmation.
 | RHOAIENG-101161 | Feature Store | Supplementary bug; source version gap; wrong similar repository |
 
 Source: `evaluation-candidates.json` in the AISDLC-546 workbench folder.
+
+## Evaluation results
+
+The repository-planning implementation ([PR #56](https://github.com/fullsend-ai/epic-creator/pull/56),
+head `b4eb278`, including all six publication-review fixes) was evaluated on
+2026-11-18 against six real captured RHAISTRAT strategies using the production
+planner, drafter, reviewer and dispatcher with fixture-only configuration and no
+live Jira access.
+
+| Strategy | Epics | Automated review | Resolved repositories |
+| --- | ---: | --- | ---: |
+| RHAISTRAT-1413 | 6 | pass, 14/14 | 0 — evidence conflict left implementation work unresolved with reasons |
+| RHAISTRAT-1631 | 10 | pass, 13/14 | 7 |
+| RHAISTRAT-2155 | 10 | pass, 13/14 | 6 |
+| RHAISTRAT-2369 | 5 | pass, 14/14 | 4 |
+| RHAISTRAT-2649 | 13 | pass, 14/14 | 9 |
+| RHAISTRAT-3069 | 11 | pass, 14/14 | 4 |
+
+All six dispatchers reached DONE and all six automated reviews passed. Every
+resolved repository assignment carries verbatim evidence citations validated
+against the pinned sources, including at least one citation from the
+authoritative contribution inventory (30 of 30 resolved work items; zero missing
+evidence). Unresolved destinations remained blocked with recorded reasons and
+the human-correction warning, matching the decision above. The full regression
+suite passed locally: 594 tests, with ten pre-existing end-to-end errors caused
+by a missing `openssl` binary on the test machine rather than the code.
+
+Limits: the evaluation workers ran on GLM 5.3 (a free hosted model) rather than
+the frontier model used by earlier baselines, because no model budget remained;
+review scores are therefore not quality-comparable with those baselines, and
+this run validates pipeline mechanics of the fixed code. The contribution
+inventory is provisional fixture configuration; production contribution
+approval and the per-case owner review remain outstanding. No Jira issues,
+URL fields or comments were created in this evaluation. Full artifacts:
+`test-results/b4eb278-2026-11-18` in the AISDLC-546 workbench folder.
 
 ## References
 
