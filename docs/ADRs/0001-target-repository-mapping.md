@@ -69,27 +69,37 @@ and preserve the findings for a later attempt.
 
 ### Use Architecture Context for RHAI repository selection
 
-Use release-appropriate documents and active overlays from
-[Architecture Context](https://github.com/opendatahub-io/architecture-context/)
-as RHAI's architectural evidence. Reuse the shared bootstrap's checkout rather
-than fetching an independent architecture source. The imported RHAI
-component/repository mapping remains supporting evidence.
+Repository selection combines four RHAI sources with distinct roles:
 
-Keep approved contribution destinations and contribution rules in the workload's
-inventory and policy. Architecture descriptions, product mappings and fork
-relationships do not independently authorize a contribution target. Conflicting
-or insufficient evidence leaves the assignment unresolved.
+- **Contribution inventory** — the list of approved contribution destinations.
+  This is the authoritative source: it is the only input that can approve a
+  repository as a contribution target.
+- **Contribution rules** — the workload's policy for where changes should be
+  contributed, kept with the inventory.
+- **Component/repository mapping** — maps Jira components to repositories.
+  Supporting evidence: it suggests candidates but does not approve them.
+- **Architecture Context** — release-appropriate documents and active overlays
+  from [Architecture Context](https://github.com/opendatahub-io/architecture-context/),
+  divided by release. Supporting evidence: component responsibilities, APIs and
+  repository relationships that explain where a change belongs. Reuse the shared
+  bootstrap's checkout rather than fetching an independent architecture source.
+
+Architecture descriptions, product mappings and fork relationships never
+independently authorize a contribution target. Conflicting or insufficient
+evidence leaves the assignment unresolved.
+
+Today the RHAI inventory, rules and mapping are configuration files inside the
+Epic Creator repository (`config/rhai/`); see the configuration-placement
+follow-up below. Other workloads configure their own maintained evidence and
+inventory while using the same planner. Source definitions declare ownership,
+authoritative or supporting roles, Git locations, revisions and relevant
+paths. Project-specific mapping rules belong in workload data.
 
 Do not add the [product/upstream mapping project](https://gitlab.cee.redhat.com/ospodata/mapping)
 as a direct input to Epic Creator for the current RHAI scope. For broader adoption,
 its repository-discovery data may help populate platform definitions and generate
 Architecture Context. That is a future integration, not a dependency of this
 Epic Creator decision.
-
-Other workloads configure their own maintained evidence and inventory while
-using the same planner. Source definitions declare ownership, authoritative or
-supporting roles, Git locations, revisions and relevant paths. Project-specific
-mapping rules belong in workload data.
 
 ### Publish the canonical URL in the existing Jira field
 
@@ -200,9 +210,12 @@ this decision.
   workload can supply context from a curated snapshot, live repository
   inspection or another store behind the same interface. What the platform
   owns versus what workloads supply remains open.
-- **Configuration placement.** The RHAI repository-mapping configuration
-  cannot live indefinitely inside Epic Creator; moving it toward the
-  architecture-context repository keeps Epic Creator workload-agnostic.
+- **Configuration placement.** The RHAI repository-mapping configuration —
+  the contribution inventory, contribution rules and component/repository
+  mapping under `config/rhai/` — cannot live indefinitely inside Epic Creator
+  because it must serve every workload. The Tech Review Forum asked to move
+  these files to the architecture-context repository, keeping Epic Creator
+  workload-agnostic.
 - **Configuration experience.** Epic Creator is configured through files
   while other fullsend agents read environment variables; the two models
   need reconciling into a single user-facing configuration experience.
