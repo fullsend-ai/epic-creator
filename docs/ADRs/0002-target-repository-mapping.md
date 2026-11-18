@@ -1,6 +1,6 @@
 ---
 title: 'Assign one target repository to each implementation epic'
-status: Accepted
+status: Proposed
 topics:
   - workloads
   - jira
@@ -15,7 +15,8 @@ Updated: 2026-11-18
 
 ## Status
 
-Accepted. Confirmed at the RHAI Tech Review Forum on 2026-11-17.
+Proposed. The RHAI Tech Review Forum endorsed the approach on 2026-11-17;
+acceptance follows PR review and merge.
 
 ## Context
 
