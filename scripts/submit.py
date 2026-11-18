@@ -338,6 +338,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
                 components=components,
                 parent_key=strat_id,
                 assignee_id=assignee_id,
+                retry_ambiguous=False,
             )
         except Exception as e:
             print(f"  ERROR creating {epic_id}: {e}", file=sys.stderr)

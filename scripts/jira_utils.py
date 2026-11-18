@@ -78,8 +78,13 @@ def api_call(server, path, user, token, body=None, method=None):
 
 
 def api_call_with_retry(server, path, user, token, body=None, method=None,
-                        max_retries=3):
-    """Wrap api_call with retry on transient errors."""
+                        max_retries=3, retry_ambiguous=True):
+    """Wrap api_call with retry on transient errors.
+
+    Ambiguous failures are 502/503/504 and network errors. They are not
+    retried for non-idempotent requests because the server may already have
+    performed the operation.
+    """
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -93,6 +98,8 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
                 last_error = e
                 continue
             if e.code in (502, 503, 504):
+                if not retry_ambiguous:
+                    raise
                 wait = 4 ** attempt  # 1, 4, 16
                 print(f"  HTTP {e.code}, retrying in {wait}s...",
                       file=sys.stderr)
@@ -101,6 +108,8 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
                 continue
             raise
         except urllib.error.URLError as e:
+            if not retry_ambiguous:
+                raise
             wait = 4 ** attempt
             print(f"  {safe_error_message(e)}, retrying in {wait}s...",
                   file=sys.stderr)
@@ -384,7 +393,7 @@ def add_comment(server, user, token, issue_key, body_adf):
 
 def create_issue(server, user, token, project, issue_type, summary,
                  description_adf, priority, labels=None, components=None,
-                 parent_key=None, assignee_id=None):
+                 parent_key=None, assignee_id=None, retry_ambiguous=True):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
         "fields": {
@@ -403,7 +412,8 @@ def create_issue(server, user, token, project, issue_type, summary,
         body["fields"]["parent"] = {"key": parent_key}
     if assignee_id:
         body["fields"]["assignee"] = {"accountId": assignee_id}
-    result = api_call_with_retry(server, "/issue", user, token, body=body)
+    result = api_call_with_retry(server, "/issue", user, token, body=body,
+                                 retry_ambiguous=retry_ambiguous)
     return result["key"]
 
 
