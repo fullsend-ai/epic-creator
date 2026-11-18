@@ -352,6 +352,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None, create=
                 components=components,
                 parent_key=strat_id,
                 assignee_id=assignee_id,
+                retry_ambiguous=False,
             )
             if "custom_fields" in entry:
                 fields["custom_fields"] = entry["custom_fields"]

@@ -66,6 +66,16 @@ def test_component_skip_preserves_fixture_without_credentials_or_network(
     assert component_output.read_bytes() == fixture
 
 
+def test_eval_does_not_intercept_component_fetch():
+    config_path = (Path(__file__).resolve().parents[1]
+                   / "eval" / "epic-decompose.yaml")
+    config = yaml.safe_load(config_path.read_text())
+    matches = [tool["match"] for tool in config["inputs"]["tools"]]
+
+    assert any("fetch_strategy.py" in match for match in matches)
+    assert not any("fetch_components.py" in match for match in matches)
+
+
 def test_fetch_and_submit_share_working_directory_component_cache(
         tmp_path, monkeypatch):
     monkeypatch.delenv("EPIC_SKIP_BOOTSTRAP", raising=False)

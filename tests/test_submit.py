@@ -353,6 +353,18 @@ class TestCreateEpics:
             "artifacts/epic-tasks/RHAISTRAT-9999-E001.md")
         assert data["jira_key"] == "RHAI-500"
 
+    def test_disables_transient_retries_for_epic_creation(self, tmp_dir):
+        from unittest.mock import patch
+        _setup_strategy(epic_count=1)
+        epics = _scan_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(epics, set())
+
+        with patch("submit.create_issue", return_value="RHAI-500") as mock_ci, \
+             patch("submit.markdown_to_adf", return_value={}):
+            _create_epics("s", "u", "t", plan, "RHAISTRAT-9999")
+
+        assert mock_ci.call_args.kwargs["retry_ambiguous"] is False
+
     def test_stops_on_first_failure(self, tmp_dir):
         from unittest.mock import patch
         _setup_strategy(epic_count=3)

@@ -99,10 +99,9 @@ scripts, so it is intercepted at the Bash layer:
   `execution.env: EPIC_SKIP_BOOTSTRAP=1` (script exits 0).
 - `scripts/fetch_components.py` (Jira `/project/RHAI/components`) — neutralized via
   `execution.env: EPIC_SKIP_COMPONENT_FETCH=1`, preserving the pre-provisioned
-  `.context/rhai-components.txt`. An `inputs.tools` entry also denies the call
-  defensively and tells the agent to treat bootstrap as successful.
+  `.context/rhai-components.txt`.
 - `scripts/fetch_strategy.py` (Jira issue fetch) — normally never launched (file
-  pre-provisioned); the same `inputs.tools` entry covers it defensively.
+  pre-provisioned); a dedicated `inputs.tools` entry intercepts it defensively.
 
 `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` are deliberately left unset.
 
@@ -133,8 +132,8 @@ are cleaned between runs):
 3. Bootstrap `.context/` (arch context + component list; one retry, then hard stop).
 4. Batch split → `tmp/pipeline-batch-N-ids.txt`.
 5. Dispatch loop on `next-action`: BATCH_START → FETCH → DECOMPOSE →
-   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (first revision
-   unconditional) → RE_REVIEW/RE_REVISE loop (cap 2 cycles) → BATCH_DONE →
+   (`compute_ai_scores.py`) → REVIEW_DECOMP → REVISE_DECOMP (skipped for IDs
+   whose first review is a clean pass) → RE_REVIEW/RE_REVISE loop (cap 2 cycles) → BATCH_DONE →
    ERROR_COLLECT (one retry batch) → REPORT → DONE. After every wave the next Bash call
    **must** be `pipeline_state.py wait-for-wave` (exit 3 → re-run).
 6. REPORT: `generate_run_report.py`; teardown: `batch_summary.py --counts-only` prints
