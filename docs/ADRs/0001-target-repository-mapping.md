@@ -245,38 +245,50 @@ during the repository-source verification work.
 
 ## Evaluation results
 
-The repository-planning implementation ([PR #56](https://github.com/fullsend-ai/epic-creator/pull/56),
-head `b4eb278`, including all six publication-review fixes) was evaluated on
-2026-11-18 against six real captured RHAISTRAT strategies using the production
-planner, drafter, reviewer and dispatcher with fixture-only configuration and no
-live Jira access.
+The repository-planning implementation ([PR #56](https://github.com/fullsend-ai/epic-creator/pull/56))
+was evaluated twice on 2026-11-18 against six real captured RHAISTRAT
+strategies with fixture-only configuration and no live Jira access.
 
-| Strategy | Epics | Automated review | Resolved repositories |
-| --- | ---: | --- | ---: |
-| RHAISTRAT-1413 | 6 | pass, 14/14 | 0 — evidence conflict left implementation work unresolved with reasons |
-| RHAISTRAT-1631 | 10 | pass, 13/14 | 7 |
-| RHAISTRAT-2155 | 10 | pass, 13/14 | 6 |
-| RHAISTRAT-2369 | 5 | pass, 14/14 | 4 |
-| RHAISTRAT-2649 | 13 | pass, 14/14 | 9 |
-| RHAISTRAT-3069 | 11 | pass, 14/14 | 4 |
+### Fullsend end-to-end run (primary)
 
-All six dispatchers reached DONE and all six automated reviews passed. Every
-resolved repository assignment carries verbatim evidence citations validated
-against the pinned sources, including at least one citation from the
-authoritative contribution inventory (30 of 30 resolved work items; zero missing
-evidence). Unresolved destinations remained blocked with recorded reasons and
-the human-correction warning, matching the decision above. The full regression
-suite passed locally: 594 tests, with ten pre-existing end-to-end errors caused
-by a missing `openssl` binary on the test machine rather than the code.
+Fullsend 0.56.1 runtime with OpenShell sandboxes, `claude-opus-4-6` via Vertex
+on the team GCP project, and the production planner, drafter, reviewer and
+dispatcher. Harness validation gates applied; Jira publication excluded by the
+eval harness (placeholder credentials, no Atlassian egress).
 
-Limits: the evaluation workers ran on GLM 5.3 rather than the frontier model
-used by earlier baselines; review scores are therefore not quality-comparable
-with those baselines, and this run validates pipeline mechanics of the fixed
-code. The contribution inventory is provisional fixture configuration;
-production contribution approval and the per-case owner review remain
-outstanding. No Jira issues, URL fields or comments were created in this
-evaluation. Full artifacts are preserved with the captured test-data bundle
-from the same evaluation series.
+| Strategy | Epics | Automated review | Outcome |
+| --- | ---: | --- | --- |
+| RHAISTRAT-1413 | 3 | pass, 14/14 | Resolved to `opendatahub-io/data-science-pipelines` |
+| RHAISTRAT-1631 | 5 | revise requested, 12/14 | One priority-mapping finding; repositories resolved across eval-hub, trustyai-service-operator and odh-dashboard |
+| RHAISTRAT-2155 | — | not accepted | The evidence-integrity check rejected the run: pinned source content changed between drafting and review. Drafting and review had completed (14/14) but the result was correctly refused |
+| RHAISTRAT-2369 | 5 | pass, 14/14 | Resolved to `opendatahub-io/odh-dashboard`; documentation destination left unresolved with warning |
+| RHAISTRAT-2649 | 3 | pass, 14/14 | Resolved across the gateway, MaaS and operator repositories |
+| RHAISTRAT-3069 | 5 | pass, 14/14 | Two work items left unresolved with warnings — the planned service repository does not exist in the inventory |
+
+Four of six accepted with passing reviews; one accepted with revision
+findings; one rejected by the integrity check. Every resolved repository was
+verified against the live GitHub repository (exists, actively maintained,
+structure matches the planned work). Unresolved destinations kept their
+reasons and the human-correction warning. The RHAISTRAT-2155 rejection is
+under root-cause investigation with the sandbox preserved.
+
+### Local dispatcher run (supplementary)
+
+A local headless run of the same six strategies on the same captured inputs
+validated pipeline mechanics independently of the Fullsend runtime: all six
+dispatchers reached DONE, all six automated reviews passed, and every resolved
+assignment (30 of 30) carried verbatim evidence citations including an
+authoritative contribution-inventory citation. The full regression suite
+passed locally: 598 tests, with ten pre-existing end-to-end errors caused by
+a missing `openssl` binary on the test machine rather than the code.
+
+Limits: neither run exercises Jira publication — the URL-field contract and
+warning comments are covered by unit and local HTTPS fixture tests only. The
+contribution inventory is provisional fixture configuration; production
+contribution approval and the per-case owner review remain outstanding. No
+Jira issues, URL fields or comments were created in either evaluation. Full
+artifacts are preserved with the captured test-data bundle from the same
+evaluation series.
 
 ## References
 
