@@ -694,9 +694,9 @@ def _publish_strategy(server, user, token, strat_id, plan, artifacts_dir, assign
 
     # Phase 5: Label source strategy (only when ALL epics are created)
     all_created = len(id_to_jira_key) == len(plan)
-    if all_created and not errors and source_complete:
+    repository_bound = any("repo_url" in entry for entry in plan)
+    if all_created and (not repository_bound or (not errors and source_complete)):
         print("  Phase 5: Labeling source strategy...")
-        repository_bound = any("repo_url" in entry for entry in plan)
         already_labeled = (repository_bound and STRAT_LABEL in
                            get_issue(server, user, token, strat_id, fields=["labels"])["fields"].get("labels", []))
         if not already_labeled and not _label_strategy(server, user, token, strat_id):
