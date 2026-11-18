@@ -102,3 +102,28 @@ def test_finalizer_rejects_noncanonical_planned_component(monkeypatch, tmp_path,
     monkeypatch.setattr(sys, "argv", ["repository_plan.py", "finalize", "--source", source.stem])
     assert repository_plan.main() == 1
     assert not locations["plan"].exists()
+
+
+def test_retryable_source_outage_blocks_then_recovers(monkeypatch, tmp_path, capsys):
+    selected, source = setup_pipeline(monkeypatch, tmp_path, capsys)
+    pipeline.cmd_next_action([])
+    capsys.readouterr()
+    key = source.stem
+
+    def outage(*args, **kwargs):
+        raise OSError("transient network failure")
+
+    import repository_context
+    real = repository_context.fetch_git_sources
+    monkeypatch.setattr(repository_context, "fetch_git_sources", outage)
+    valid = pipeline._validate_ids_individually(pipeline._load_state(), "PLAN_REPOSITORIES",
+              "tmp/pipeline-active-ids.txt", pipeline._validate_inputs_one)
+    assert valid == []
+    assert pipeline.read_status(key)["status"] == "blocked"
+
+    pipeline._write_ids("tmp/pipeline-active-ids.txt", [key])
+    monkeypatch.setattr(repository_context, "fetch_git_sources", real)
+    valid = pipeline._validate_ids_individually(pipeline._load_state(), "PLAN_REPOSITORIES",
+              "tmp/pipeline-active-ids.txt", pipeline._validate_inputs_one)
+    assert valid == [key]
+    assert pipeline.read_status(key) is None

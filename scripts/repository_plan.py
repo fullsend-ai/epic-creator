@@ -46,8 +46,7 @@ def _acyclic(graph):
         return False
 
 
-def _evidence(resolution, sources, guidance):
-    authoritative = False
+def _citations_valid(resolution, sources):
     for citation in resolution.get("evidence_refs", []):
         source = sources.get(citation["source_id"])
         if source is None or citation["path"] not in source["files"]:
@@ -55,6 +54,13 @@ def _evidence(resolution, sources, guidance):
         text = Path(source["files"][citation["path"]]["local_path"]).read_text()
         if not _quote(citation["quote"], text):
             raise RepositoryError("Repository evidence quote does not exist in bound source")
+
+
+def _evidence(resolution, sources, guidance):
+    _citations_valid(resolution, sources)
+    authoritative = False
+    for citation in resolution.get("evidence_refs", []):
+        source = sources[citation["source_id"]]
         is_guidance = guidance and (citation["source_id"], citation["path"]) == (guidance["source_id"], guidance["path"])
         authoritative |= source["role"] == "authoritative" and not is_guidance
     return authoritative
@@ -144,6 +150,7 @@ def finalize_repository_plan(context: dict, proposal: dict) -> dict:
         elif not _evidence(resolution, sources, context.get("guidance")):
             reason = "missing_authoritative_evidence"
         if reason:
+            _citations_valid(resolution, sources)
             candidates = resolution.get("candidates", [])
             if any(candidate not in inventory for candidate in candidates):
                 raise RepositoryError("Unresolved candidates must belong to contribution inventory")

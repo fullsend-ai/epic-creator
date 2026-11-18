@@ -17,6 +17,10 @@ class RepositoryError(ValueError):
     """Invalid RHAI repository configuration or bound planning artifact."""
 
 
+class RepositoryRetryableError(RepositoryError):
+    """A repository-source failure that a later retry can resolve."""
+
+
 def _digest(data):
     return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 

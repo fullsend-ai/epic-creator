@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 import yaml
 
 from repository_sources import fetch_git_sources, guidance_reference, normalize_git_source, snapshot_architecture_context
-from rhai_config import RepositoryError
+from rhai_config import RepositoryError, RepositoryRetryableError
 
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "config/_schema"
 
@@ -73,6 +73,8 @@ def _load_guidance(policy, sources):
 
 def validate_context_snapshot(context):
     if context.get("status") != "ready":
+        if context.get("retryable"):
+            raise RepositoryRetryableError("Repository context is unresolved")
         raise RepositoryError("Repository context is unresolved")
     if (digest(_binding(context)) != context["digest"]
             or validate_inventory(context["inventory_document"]) != context["inventory"]):
@@ -133,5 +135,7 @@ def assert_context_current(context: dict, selected, source_path: Path) -> None:
             if age > source["max_age_seconds"]:
                 raise RepositoryError("Repository evidence freshness expired; plan again")
     current = load_repository_context(selected, source_path, Path(context["cache_root"]).parent)
-    if current.get("status") != "ready" or current["digest"] != context["digest"]:
-        raise RepositoryError("Repository mapping inputs changed or became unavailable; plan and review again")
+    if current.get("status") != "ready":
+        raise RepositoryRetryableError("Repository mapping inputs became unavailable; retry planning")
+    if current["digest"] != context["digest"]:
+        raise RepositoryError("Repository mapping inputs changed; plan and review again")

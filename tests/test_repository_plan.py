@@ -265,3 +265,22 @@ def test_dependency_revision_rejects_new_repository_assignment(inputs):
     revised["work_items"][0]["resolution"]["target_key"] = "dashboard"
     with pytest.raises(RepositoryError, match="replanning"):
         api.revise_dependencies(context, old, revised)
+
+
+@pytest.mark.parametrize("fabricated", [True, False], ids=["fabricated", "verbatim"])
+def test_unresolved_work_evidence_must_quote_real_source(inputs, fabricated):
+    context, draft = inputs
+    source = context["sources"][0]
+    path, file = next(iter(source["files"].items()))
+    quote = next(line for line in Path(file["local_path"]).read_text().splitlines() if line.strip())
+    if fabricated:
+        quote = "This sentence appears in no bound source file."
+    draft["work_items"][1]["resolution"] = {
+        "status": "unresolved", "reason": "repository_unresolved", "candidates": [],
+        "evidence_refs": [{"source_id": source["id"], "path": path, "quote": quote}]}
+    if fabricated:
+        with pytest.raises(RepositoryError):
+            module("repository_plan").finalize_repository_plan(context, draft)
+    else:
+        plan = module("repository_plan").finalize_repository_plan(context, draft)
+        assert plan["unresolved"][0]["evidence_refs"]

@@ -61,3 +61,13 @@ def test_self_source_reads_committed_mapping_snapshot(tmp_path, monkeypatch):
     sources = api.fetch_git_sources(data, tmp_path / "cache")
     assert sources[0]["commit"] == git(repo, "rev-parse", "HEAD")
     assert Path(sources[0]["files"]["mapping.md"]["local_path"]).read_text() == "Manager and cloudmanager changes belong in operator.\n"
+
+
+def test_self_source_url_stays_workspace_independent(tmp_path, monkeypatch):
+    repo = git_source(tmp_path)
+    api = module("repository_sources")
+    monkeypatch.setattr(api, "__file__", str(repo / "scripts/repository_sources.py"))
+    data = policy(repo)
+    data["sources"][0].update(url="self", ref="HEAD", paths=["mapping.md"])
+    sources = api.fetch_git_sources(data, tmp_path / "cache")
+    assert sources[0]["url"] == "self"

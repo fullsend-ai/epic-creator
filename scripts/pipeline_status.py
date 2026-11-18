@@ -9,7 +9,7 @@ import tempfile
 
 
 STATUS_DIR = Path("tmp/pipeline-status")
-_VALID_STATUSES = {"invalid", "skipped"}
+_VALID_STATUSES = {"invalid", "skipped", "blocked"}
 
 
 def _path(key):

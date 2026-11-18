@@ -45,7 +45,11 @@ def check_id(phase, strat_id):
     """Check one ID. Returns 'completed', 'pending', or 'error'."""
     status = read_status(strat_id)
     if status is not None:
-        return "error" if status["status"] == "invalid" else "completed"
+        if status["status"] == "invalid":
+            return "error"
+        if status["status"] == "blocked":
+            return "pending"
+        return "completed"
     path = PHASE_CHECKS[phase](strat_id)
     if not os.path.exists(path):
         return "pending"

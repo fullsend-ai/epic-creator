@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from pipeline_repositories import bound_config, phase_config, agent_variables, validate_inputs, validate_completed
 from pipeline_status import read_status, write_status, clear_all_statuses
+from rhai_config import RepositoryRetryableError
 
 import yaml
 
@@ -188,13 +189,19 @@ def _validate_ids_individually(state, phase, ids_file, validator):
         return ids
     valid = []
     for key in ids:
-        if read_status(key):
+        status = read_status(key)
+        if status and status["status"] != "blocked":
             continue
         try:
             validator(state, phase, key)
+        except RepositoryRetryableError as exc:
+            write_status(key, "blocked", phase.lower(), str(exc))
         except (ValueError, OSError, KeyError) as exc:
             write_status(key, "invalid", phase.lower(), str(exc))
         else:
+            if status:
+                from pipeline_status import clear_status
+                clear_status(key)
             valid.append(key)
     if valid != ids:
         _write_ids(ids_file, valid)

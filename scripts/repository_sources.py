@@ -121,6 +121,9 @@ def snapshot_architecture_context(cache_root: Path) -> dict:
 def fetch_git_sources(policy: dict, cache_root: Path) -> list[dict]:
     manifests = []
     for reference in policy["sources"]:
+        # "self" resolves to this checkout for fetching, but manifests and digests
+        # must stay workspace-independent, so the stable identifier is restored.
+        is_self = reference.get("url") == "self"
         source = normalize_git_source(reference)
         cache = Path(cache_root) / source["id"]
         cache.mkdir(parents=True, exist_ok=True)
@@ -128,5 +131,8 @@ def fetch_git_sources(policy: dict, cache_root: Path) -> list[dict]:
             _git(cache, "init", "--bare")
         _git(cache, "fetch", "--depth=1", "--no-tags", "--", source["url"], source["ref"])
         commit = _git(cache, "rev-parse", "FETCH_HEAD^{commit}")
-        manifests.append(_snapshot(source, cache, cache, commit))
+        manifest = _snapshot(source, cache, cache, commit)
+        if is_self:
+            manifest["url"] = "self"
+        manifests.append(manifest)
     return manifests
