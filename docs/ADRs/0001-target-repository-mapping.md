@@ -253,8 +253,9 @@ strategies with fixture-only configuration and no live Jira access.
 
 Fullsend 0.56.1 runtime with OpenShell sandboxes, `claude-opus-4-6` via Vertex
 on the team GCP project, and the production planner, drafter, reviewer and
-dispatcher. Harness validation gates applied; Jira publication excluded by the
-eval harness (placeholder credentials, no Atlassian egress).
+dispatcher, evaluated at PR #56 commit `9859757`. Harness validation gates
+applied; Jira publication excluded by the eval harness (placeholder
+credentials, no Atlassian egress).
 
 | Strategy | Epics | Automated review | Outcome |
 | --- | ---: | --- | --- |
