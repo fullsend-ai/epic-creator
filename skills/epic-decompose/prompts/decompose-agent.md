@@ -58,7 +58,7 @@ If the strategy contains a Staff Engineer Input section that is non-empty (beyon
 
 ## Step 2: Build Component Graph
 
-**Component name constraint:** Read `.context/rhai-components.txt` for the canonical list of RHAI Jira components. When assigning a component to an epic, you MUST use a name from this list. Match the strategy's Affected Components to the closest canonical name. If no reasonable match exists, use the closest parent-level component (e.g. "Model Serving Runtimes" for a new runtime not yet in the list). Log any non-obvious mappings in the decomposition summary.
+**Component name constraint:** Read `.context/rhai-components.txt` for the canonical list of RHAI Jira components. When assigning a component to an epic, you MUST use a name from this list. Match the strategy's Affected Components to the closest canonical name. If no reasonable match exists, use the closest parent-level component (e.g. "Model Serving Runtimes" for a new runtime not yet in the list). Log any non-obvious mappings in the decomposition summary. Only if no canonical component — not even a parent-level one — genuinely fits, set `needs_component=true` on the epic and keep the most descriptive name in `component`; the epic is then created without a Jira component and labeled for human review. Do not use `needs_component` to avoid choosing between plausible canonical names, and do not force a misleading mapping just to avoid it.
 
 For each (component, change, owner team) tuple from the Affected Components table:
 
@@ -328,6 +328,13 @@ python3 scripts/frontmatter.py batch-read artifacts/epic-tasks/{ID}-*E[0-9][0-9]
 ```
 
 Compare the output against the decomposition summary. If any epic file's `dependencies`, `priority`, `type`, or HLR mappings diverged from the plan, fix the epic file to match the summary.
+
+Then check every epic's component against the canonical list:
+```
+python3 scripts/check_components.py {ID}
+```
+
+A non-zero exit lists each `INVALID` or `CONFLICT` epic with the closest canonical names and the exact fix command. Correct each one (set `component` to the canonical name that fits, or set `needs_component=true` only when none fits — see Step 2) and re-run until it exits 0. `FLAGGED` lines are informational.
 
 Then, as your **final action** — after every epic file is written and any divergence is fixed — mark the decomposition complete:
 

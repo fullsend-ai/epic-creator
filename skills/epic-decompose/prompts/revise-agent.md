@@ -39,6 +39,7 @@ For each issue in the review's `issues` list, apply the appropriate correction:
 - **Scope duplication across sibling epics**: Two or more epics independently build the same data structure, UI surface, or API endpoint. Merge the overlapping epics into one, or re-split along an architectural sub-system boundary (e.g., backend vs. frontend) instead of the current axis. Deduplicate acceptance criteria and scope. Delete any epic files that were merged away and update the decomposition summary.
 - **Multi-component/team epic**: Split into separate epics per the component/team tuple rule. Assign new epic IDs continuing the sequence (e.g., if last epic is E007, new ones are E008, E009).
 - **Oversized epic**: Split by sub-deliverable into smaller epics.
+- **Non-canonical component**: Run `python3 scripts/check_components.py {ID}` for the closest canonical names. Change only the epic's component fields (`component`, and `needs_component` where noted below) — e.g. `python3 scripts/frontmatter.py set <epic file> component="<canonical name>"` — to the canonical name that fits its scope (the owning or parent-level component). Only if no canonical component fits, keep the descriptive name and set `needs_component=true` instead, so the epic goes to human review rather than getting a misleading component. If the reviewer named a canonical component for a `needs_component: true` epic, set that component and `needs_component=false`.
 
 ### Type Correctness issues
 - **Investigation should be Implementation**: Change the `type` field to Implementation. Remove downstream blocking edges if the epic doesn't actually determine downstream structure. Add concrete artifact description.
@@ -87,5 +88,6 @@ Before finishing, verify:
 - No circular dependencies in the DAG
 - Every epic referenced in `dependencies` lists actually exists as a file
 - `epic_count` in the summary matches the actual number of epic files
+- `python3 scripts/check_components.py {ID}` exits 0
 
 Do not return a summary. Your work is complete when you have run `frontmatter.py set` with `revised=true` (changes made) or `revised=false` (no corrections needed). The pipeline uses this field to detect that the revision agent has finished.

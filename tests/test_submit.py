@@ -291,6 +291,38 @@ class TestLabels:
         assert "epic-creator-needs-component" not in plan[0]["labels"]
         assert plan[0]["component"] == "test-component"
 
+    def test_explicit_needs_component_leaves_component_unset(self, tmp_dir):
+        """needs_component=true is the explicit no-suitable-component
+        path: no Jira component, needs-component label."""
+        _setup_strategy(epic_count=1)
+        _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
+                "component=Quantum Billing Portal", "needs_component=true")
+        epics = _scan_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(epics, {"test-component"})
+        assert plan[0]["component"] is None
+        assert plan[0]["raw_component"] == "Quantum Billing Portal"
+        assert "epic-creator-needs-component" in plan[0]["labels"]
+
+    def test_explicit_needs_component_without_cache(self, tmp_dir):
+        """The explicit flag is honored even when the component list is
+        unavailable."""
+        _setup_strategy(epic_count=1)
+        _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
+                "needs_component=true")
+        epics = _scan_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(epics, None)
+        assert plan[0]["component"] is None
+        assert "epic-creator-needs-component" in plan[0]["labels"]
+
+    def test_needs_component_false_keeps_valid_component(self, tmp_dir):
+        _setup_strategy(epic_count=1)
+        _run_fm("set", "artifacts/epic-tasks/RHAISTRAT-9999-E001.md",
+                "needs_component=false")
+        epics = _scan_epics("artifacts", "RHAISTRAT-9999")
+        plan = _build_plan(epics, {"test-component"})
+        assert plan[0]["component"] == "test-component"
+        assert "epic-creator-needs-component" not in plan[0]["labels"]
+
 
 class TestBuildPlan:
     def test_includes_jira_key_from_frontmatter(self, tmp_dir):

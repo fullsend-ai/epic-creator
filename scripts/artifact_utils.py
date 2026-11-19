@@ -79,6 +79,14 @@ SCHEMAS = {
             "type": "string",
             "required": True,
         },
+        # Explicit human-review path: true when no canonical RHAI component
+        # fits. submit.py then leaves the Jira component unset and adds the
+        # epic-creator-needs-component label.
+        "needs_component": {
+            "type": "bool",
+            "required": False,
+            "default": False,
+        },
         "team": {
             "type": "string",
             "required": True,

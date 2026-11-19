@@ -17,6 +17,13 @@ Output: artifacts/epic-reviews/{ID}-decomp-review.md
 3. Read all epic files matching `artifacts/epic-tasks/{ID}-E*.md` (excluding `-ai-signals.md` files)
 4. Read all AI signal rationale files matching `artifacts/epic-tasks/{ID}-E*-ai-signals.md`
 5. Read all conditional branch files matching `artifacts/epic-tasks/{ID}-BRANCH-*-E*.md` — the `{ID}-E*.md` glob in step 3 does **not** match these, so read them separately when the decomposition uses conditional branches.
+6. Check every epic's component against the canonical list (covers branch files too):
+
+   ```bash
+   python3 scripts/check_components.py {ID}
+   ```
+
+   Use its output in Criterion 3.
 
 If the decomposition summary does not exist, create the review file with an error and stop:
 
@@ -39,8 +46,8 @@ Conversely, if `triage` is absent (full decomposition), do not penalize the deco
 Evaluate the decomposition against these 7 criteria. For each, note specific issues found with severity:
 
 - **Critical**: Structural defect — circular DAG, invalid DAG edge (references nonexistent epic or contradicts diagram), missing DAG edge where a data/artifact dependency exists, frontmatter dependencies inconsistent with decomposition DAG, P0 HLR unmapped, epic type fundamentally wrong
-- **Major**: Rule violation or factual error — missing rule-mandated AC (rules 24-26), frontmatter field contradicts summary table, wrong team/component assignment, unjustified blocking edge that serializes parallel work, AI implementability score contradicts signals
-- **Minor**: Style or completeness nit — could be more explicit but doesn't cause incorrect execution (e.g., a "should" NFR not explicitly addressed, slightly imprecise component name)
+- **Major**: Rule violation or factual error — missing rule-mandated AC (rules 24-26), frontmatter field contradicts summary table, wrong team/component assignment, non-canonical component (`INVALID` or `CONFLICT` from `check_components.py`), unjustified blocking edge that serializes parallel work, AI implementability score contradicts signals
+- **Minor**: Style or completeness nit — could be more explicit but doesn't cause incorrect execution (e.g., a "should" NFR not explicitly addressed, slightly imprecise component name that is still canonical)
 
 ### Criterion 1: HLR Coverage (0-2 points)
 
@@ -64,7 +71,7 @@ Check: Trace the dependency graph. Verify each edge against the DAG construction
 - **1**: One epic is slightly oversized but could be completed in a single sprint, or one boundary edge case (e.g., shared utility code attributed to one team when two teams contribute).
 - **0**: Epics violate the component/team boundary rule (work for different teams bundled into one epic), or an epic is clearly oversized (multiple sprints of work).
 
-Check: For each epic, verify component and team fields. Look for epics that bundle work across multiple components or teams. **Also check for scope duplication across sibling epics:** compare the scope sections and acceptance criteria of all epics. If two or more epics independently build the same data structure, UI surface, API endpoint, or component (e.g., both create a benchmark list with status indicators, or both implement log viewing against the same endpoint), that is a major issue — it means the boundary was drawn incorrectly and the epics should be merged or re-split along a different axis. Minor incidental overlap (e.g., both epics mention the same config value) is not duplication. **Also check for work-product type mixing:** if a single epic bundles code implementation with content authoring (sample notebooks, tutorials, curated examples), flag as a major issue — these are different kinds of work with different review criteria and should be separate epics even when owned by the same team.
+Check: For each epic, verify component and team fields. **Every `INVALID` or `CONFLICT` line from `check_components.py` is a major issue** — record one issue per epic, quoting the non-canonical name and the suggested canonical names so the revise agent can correct it. `FLAGGED` epics (`needs_component: true`) are an explicit human-review request, not an issue — unless the canonical list clearly contains a component that fits the epic's scope, in which case record a major issue naming that component. Look for epics that bundle work across multiple components or teams. **Also check for scope duplication across sibling epics:** compare the scope sections and acceptance criteria of all epics. If two or more epics independently build the same data structure, UI surface, API endpoint, or component (e.g., both create a benchmark list with status indicators, or both implement log viewing against the same endpoint), that is a major issue — it means the boundary was drawn incorrectly and the epics should be merged or re-split along a different axis. Minor incidental overlap (e.g., both epics mention the same config value) is not duplication. **Also check for work-product type mixing:** if a single epic bundles code implementation with content authoring (sample notebooks, tutorials, curated examples), flag as a major issue — these are different kinds of work with different review criteria and should be separate epics even when owned by the same team.
 
 ### Criterion 4: Type Correctness (0-2 points)
 

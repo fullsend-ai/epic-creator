@@ -208,10 +208,15 @@ def _build_plan(epics, valid_components):
         title = data["title"]
         priority = PRIORITY_MAP.get(data["priority"], "Major")
         raw_component = data.get("component", "")
+        # needs_component is the explicit "no canonical component fits"
+        # signal: leave the Jira component unset for human review.
+        needs_component = data.get("needs_component") is True
         # Only validate when the component cache is available (not None).
         # None means the cache file is missing — pass through the
         # frontmatter value rather than stripping valid components.
-        if valid_components is not None:
+        if needs_component:
+            component = None
+        elif valid_components is not None:
             component = validate_component(raw_component, valid_components)
         else:
             component = raw_component or None
@@ -230,7 +235,12 @@ def _build_plan(epics, valid_components):
         if ai_impl:
             labels.append(
                 f"epic-creator-ai-impl-{ai_impl.lower()}")
-        if valid_components is not None and not component:
+        if needs_component:
+            labels.append("epic-creator-needs-component")
+            print(f"  NOTE: {epic_id} flagged needs_component "
+                  f"({raw_component!r}) — component left unset for "
+                  f"human review", file=sys.stderr)
+        elif valid_components is not None and not component:
             labels.append("epic-creator-needs-component")
             print(f"  WARNING: {epic_id} component "
                   f"{raw_component!r} not in RHAI component list",
