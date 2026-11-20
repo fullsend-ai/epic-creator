@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fetches the latest RHOAI architecture context via sparse checkout.
+# Fetches the latest RHOAI architecture context and overlays via sparse checkout.
 # Safe to run multiple times — pulls updates if already cloned.
 
 if [ -n "${EPIC_SKIP_BOOTSTRAP:-}" ]; then
@@ -17,11 +17,11 @@ if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
 fi
 
 if [ -d "$CONTEXT_DIR" ]; then
-  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST"
+  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST" overlays
   git -C "$CONTEXT_DIR" pull --quiet
 else
   git clone --depth 1 --filter=blob:none --sparse https://github.com/opendatahub-io/architecture-context "$CONTEXT_DIR"
-  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST"
+  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST" overlays
 fi
 
 echo "Architecture context ready: $CONTEXT_DIR/architecture/$LATEST"

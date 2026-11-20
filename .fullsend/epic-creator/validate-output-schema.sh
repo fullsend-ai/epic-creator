@@ -139,4 +139,31 @@ if [[ ! -f "${REPORT_PATH}" || -L "${REPORT_PATH}" || ! -s "${REPORT_PATH}" ]]; 
   exit 1
 fi
 
-echo "PASS: pipeline phase DONE, current run report present"
+# A completed state can contain sources removed from the active wave after a
+# validation failure. An old passing review must not hide those failures.
+# Parse data only with the runner's Python; never import downloaded repo code.
+if ! python3 - "${TARGET_REPO_DIR}" "${REPORT_PATH}" <<'PY'
+import json
+from pathlib import Path
+import sys
+import yaml
+
+try:
+    root = Path(sys.argv[1])
+    for path in sorted((root / "tmp/pipeline-status").glob("*.json")):
+        status = json.loads(path.read_text())
+        if status["status"] == "invalid":
+            raise ValueError(f"{status['key']}: {status['message']}")
+    report = yaml.safe_load(Path(sys.argv[2]).read_text())
+    for result in report.get("results", []):
+        if result.get("status") in {"invalid", "error", "missing"}:
+            raise ValueError(f"{result.get('strat_id')}: {result.get('error', result['status'])}")
+except (OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError) as exc:
+    print(f"FAIL: pipeline execution error: {exc}")
+    sys.exit(1)
+PY
+then
+  exit 1
+fi
+
+echo "PASS: pipeline phase DONE, current run report present, no execution errors"
