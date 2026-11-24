@@ -336,15 +336,6 @@ strategy without enabling it for all runs. It is not per-repo or
 per-team. If a strategy touches multiple repos, resolution applies to
 all of them in that run.
 
-### Generic design
-
-The resolver contains no hardcoded RHAI source URLs, repository lists,
-or mapping rules. RHAI is one workload configuration: a component
-mapping, an architecture-context source declaration, and
-workload-specific interpretation guidance. Another workload declares
-its own mapping and sources and gets the same layered resolution
-without code changes.
-
 ### Design tradeoff: seamless vs. maintainable
 
 Resolution should be seamless to the end user — the system figures out
