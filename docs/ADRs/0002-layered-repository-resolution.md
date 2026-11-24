@@ -63,7 +63,11 @@ sources).
 ### Three resolution layers
 
 Resolution proceeds through three ordered layers, cheapest and most
-certain first. Stop at the first definitive answer.
+certain first. Stop at the first definitive answer. Because each layer
+records which layer resolved and why — a mapping hit, a cited
+architecture doc, or an LLM guess — the selection is verifiable by both
+agents (downstream validation scripts) and humans (the reviewer sees
+the evidence in the epic comment).
 
 **Layer 1 — Component mapping (deterministic).** Look up the Jira
 component in a maintained mapping. If the component maps to exactly one
