@@ -256,27 +256,11 @@ when more consumers need it is decided with the fullsend maintainers.
 A RHAISTRAT strategy arrives with one or more Jira components and a
 description containing requirements and acceptance criteria.
 
-**Step 1 — Resolve components.** The strategy lists its affected
-components (e.g., "AI Evaluations", "AI Core Dashboard"). For each
-component, the resolver runs:
-
-- Layer 1: look up the component in the mapping. "AI Core Dashboard"
-  maps to one repo (odh-dashboard) → resolved, done. "AI Evaluations"
-  maps to three repos (eval-hub, trustyai-explainability,
-  trustyai-service-operator) → pass candidates to layer 2.
-- Layer 2: use architecture context to narrow the three candidates
-  (how — deterministic metadata or LLM with evidence — is an open
-  question). If one repo is identified → resolved. If not → pass
-  candidates to layer 3.
-- Layer 3: the LLM reads the Jira description and architecture
-  context, picks eval-hub from the three candidates → hint for the
-  human reviewer, never published as the answer.
-
-After this step, each component has a resolved repo or is unresolved
-with candidates and a hint. Each resolution carries evidence: which
-layer resolved it, the cited text from architecture context (if Layer 2
-or 3 ran), and the source snapshot (mapping version, arch context commit
-SHA). This evidence is preserved through the remaining steps.
+**Step 1 — Resolve components.** For each Jira component in the
+strategy, call the resolution skill (see "Three resolution layers"
+above). Each component gets a resolved repo with evidence, or an
+unresolved result with candidates and a hint. The evidence is preserved
+through the remaining steps.
 
 **Step 2 — Split into work items.** Using the resolved component → repo
 map, split the strategy's requirements into work items. Each work item
