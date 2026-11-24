@@ -155,6 +155,14 @@ content hash. Refs are resolved to a commit SHA at load time. If the
 content changes between resolution and verification, the integrity
 check rejects the result.
 
+For RHAI, the architecture-context repository already contains a
+`component-map.json` with full structured details for each component:
+repository organization, name, URL, release ref, component type
+(operator, ui, asset, …), tier (core_platform, …), cross-references
+to other components, and discovery confidence. This is the data that
+Layer 2 would use — it already has the structured metadata needed to
+narrow candidates when Layer 1 returns multiple repos.
+
 Any workload points at its own architecture repository. The resolution
 logic does not change.
 
@@ -164,21 +172,32 @@ docs — stays in the workload configuration, not in the resolution skill.
 ### Architecture context skill (from Nov 17 tech review)
 
 Ralph proposed that agents should not reference the architecture context
-repository directly. Instead, each workload provides a skill called
-"architecture context" that the agent loads at runtime. For RHAI, the
-skill definition lives in the architecture-context repo and instructs
-the agent how to read the RHAI docs. For another workload with different
-data sources — for example, a team that queries repos live instead of
-maintaining a static architecture-context repo — the skill instructs
-the agent how to get the same information from their source.
+repository directly. Instead, each workload provides a skill that
+instructs the agent how to read that workload's architecture docs. The
+architecture context is loaded and snapshotted upfront — sources are
+fetched, pinned to a commit SHA, and content-hashed before the resolver
+runs. The skill does not fetch data at resolution time; it provides the
+interpretation guidance: which files to read, what the structure means,
+how to map component names to repos.
 
-This fits the resolver design: Layer 2 calls the architecture context
-skill rather than reading a hardcoded source. The skill abstracts how
-context is fetched and read, so different workloads can provide different
-implementations without changing the resolver. This also addresses the
-scaling concern from the Nov 17 review — workloads that cannot afford
-to maintain a static architecture-context repo at scale can provide a
-skill that works differently.
+For RHAI, the skill definition lives in the architecture-context repo
+itself (which already has 12 skills including `discover-components`,
+`repo-to-architecture-summary`, and `analyze-platform-components`). The
+skill instructs the agent how to read the RHAI docs — for example, how
+to use `component-map.json` to match candidates by type and tier. For
+another workload with different data sources — for example, a team that
+queries repos live instead of maintaining a static architecture-context
+repo — the skill instructs the agent how to get the same information
+from their source.
+
+This fits the resolver design: Layer 2 reads the pre-loaded architecture
+context using the interpretation guidance from the workload's skill,
+rather than hardcoding how to read a specific source. The skill abstracts
+what the data means and how to use it, so different workloads can provide
+different implementations without changing the resolver. This also
+addresses the scaling concern from the Nov 17 review — workloads that
+cannot afford to maintain a static architecture-context repo at scale
+can provide a skill that works differently.
 
 ### Pluggable sources
 
@@ -222,8 +241,7 @@ consumer must re-resolve before acting on the result.
 The resolution logic lives in its own skill directory
 (`skills/repository-resolution/`). The skill contains the resolution
 instructions and scripts — the layered lookup, evidence citation rules,
-and verification logic. It is instructions loaded into an agent's
-context, not a service or a separate agent.
+and verification logic.
 
 The skill owns:
 - The three-layer resolution procedure
