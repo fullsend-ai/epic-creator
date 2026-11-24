@@ -228,17 +228,6 @@ Layer 3 is a hint — it is never published as the answer, so it does
 not require verification. The hint is presented to the human reviewer
 alongside the candidates and the reason resolution failed.
 
-### Input binding
-
-The resolution result is bound to:
-- The Jira component and issue inputs
-- The workload configuration
-- The source revisions or content digests (mapping, architecture
-  context)
-
-If any bound input changes, the prior resolution is invalidated. The
-consumer must re-resolve before acting on the result.
-
 ### The resolution skill
 
 The resolution logic lives in its own skill directory
@@ -249,8 +238,8 @@ and verification logic.
 The skill owns:
 - The three-layer resolution procedure
 - The verification logic (mapping membership check)
-- The output contract: resolved repo + resolving layer + source
-  binding, or unresolved + reason + candidates + hint
+- The output contract: resolved repo + resolving layer + evidence,
+  or unresolved + reason + candidates + hint
 
 The skill does not own:
 - Splitting strategies into work items
@@ -286,7 +275,7 @@ component, the resolver runs:
 After this step, each component has a resolved repo or is unresolved
 with candidates and a hint. Each resolution carries evidence: which
 layer resolved it, the cited text from architecture context (if Layer 2
-or 3 ran), and the source binding (mapping version, arch context commit
+or 3 ran), and the source snapshot (mapping version, arch context commit
 SHA). This evidence is preserved through the remaining steps.
 
 **Step 2 — Split into work items.** Using the resolved component → repo
@@ -435,7 +424,7 @@ review and owner feedback.
   instructions in the guidance prompt
 - One repo per planned PR, one epic per planned PR
 - Unresolved work gets empty URL field + warning comment
-- Input binding: changed sources invalidate prior results
+- Source snapshots: changed sources invalidate prior results
 - Feature flag (`repository_mode`) defaults to off
 
 ### What this ADR changes
@@ -475,7 +464,7 @@ execution order and separation, not rewriting the logic.
 - Source loading, snapshotting, hashing
 - One epic per planned PR, one repo per planned PR
 - Unresolved handling (warning comment, empty URL)
-- Input binding and invalidation
+- Source snapshot invalidation
 - Feature flag gating
 - The `repository_plan.py finalize` deterministic validator
 
