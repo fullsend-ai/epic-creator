@@ -88,13 +88,15 @@ candidates. How this layer works is an open design question:
 If this layer identifies exactly one repository, return it. If it
 cannot narrow the candidates, pass them to layer 3.
 
-**Layer 3 — LLM guess from Jira description (hint only).** The LLM
-receives two inputs: the candidate repositories from the mapping and
-the Jira issue description. No architecture context — that was Layer
-2's input. The LLM reads what the issue asks for and picks the most
-likely repository from the candidates. The guess is recorded as a hint
-for a human reviewer — it is never published as the repository. This
-is a signal to the human, not a decision by the system.
+**Layer 3 — LLM guess (hint only).** The LLM receives the candidate
+repositories from the mapping, the Jira issue description, and the
+architecture context. If Layer 2 is deterministic, this is the first
+time an LLM reads the architecture context — combined with the Jira
+description, it has enough to make a reasonable guess. The LLM picks
+the most likely repository from the candidates. The guess is recorded
+as a hint for a human reviewer — it is never published as the
+repository. This is a signal to the human, not a decision by the
+system.
 
 When no layer resolves, the resolver returns unresolved with:
 - The reason resolution failed
@@ -256,9 +258,9 @@ component, the resolver runs:
   (how — deterministic metadata or LLM with evidence — is an open
   question). If one repo is identified → resolved. If not → pass
   candidates to layer 3.
-- Layer 3: the LLM reads the Jira description and picks eval-hub
-  from the three candidates → hint for the human reviewer, never
-  published as the answer.
+- Layer 3: the LLM reads the Jira description and architecture
+  context, picks eval-hub from the three candidates → hint for the
+  human reviewer, never published as the answer.
 
 After this step, each component has a resolved repo or is unresolved
 with candidates and a hint.
