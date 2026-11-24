@@ -280,7 +280,10 @@ component, the resolver runs:
   human reviewer, never published as the answer.
 
 After this step, each component has a resolved repo or is unresolved
-with candidates and a hint.
+with candidates and a hint. Each resolution carries evidence: which
+layer resolved it, the cited text from architecture context (if Layer 2
+or 3 ran), and the source binding (mapping version, arch context commit
+SHA). This evidence is preserved through the remaining steps.
 
 **Step 2 — Split into work items.** Using the resolved component → repo
 map, split the strategy's requirements into work items. Each work item
@@ -296,12 +299,15 @@ operator change, or code versus documentation — become separate planned
 PRs. Each planned PR has exactly one repo.
 
 **Step 4 — Draft epics.** One epic per planned PR. Each epic carries the
-resolved repo URL. Unresolved work items still get an epic, but with an
-empty repo field and a warning comment carrying the reason and candidate
-hints.
+resolved repo URL and the resolution evidence — which layer resolved it
+and the cited sources. Unresolved work items still get an epic, but with
+an empty repo field and a comment carrying the reason, candidates, hint,
+and what evidence was available.
 
 **Step 5 — Review and publish.** Epics are reviewed and published to
-Jira. The repo URL is written to the configured Jira URL field. Changed
+Jira. The repo URL is written to the configured Jira URL field. The
+resolution evidence is added as a Jira comment so the reviewer can
+verify the assignment. Changed
 inputs since resolution invalidate the result and force re-resolution
 before publication.
 
