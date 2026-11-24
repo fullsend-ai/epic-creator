@@ -148,7 +148,16 @@ sources:
     paths:
       - docs/
     role: architecture
+    skills:
+      - discover-components
+      - repo-to-architecture-summary
 ```
+
+The source declaration tells the platform where the data lives. The
+`skills` field tells it which skills from that source to load for
+interpretation — these provide the guidance on how to read the data,
+what the structure means, and how to map component names to repos.
+Different workloads load different skills for the same resolver.
 
 A generic loader fetches the source, snapshots it, and records a
 content hash. Refs are resolved to a commit SHA at load time. If the
@@ -165,9 +174,6 @@ narrow candidates when Layer 1 returns multiple repos.
 
 Any workload points at its own architecture repository. The resolution
 logic does not change.
-
-Interpretation guidance — how to read a particular set of architecture
-docs — stays in the workload configuration, not in the resolution skill.
 
 ### Architecture context skill (from Nov 17 tech review)
 
