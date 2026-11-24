@@ -172,50 +172,43 @@ to other components, and discovery confidence. This is the data that
 Layer 2 would use — it already has the structured metadata needed to
 narrow candidates when Layer 1 returns multiple repos.
 
-Any workload points at its own architecture repository. The resolution
-logic does not change.
+The component mapping, architecture context, and other sources are
+declared sources with the same structure: `id`, `url`, `ref`, `paths`,
+`role`, `skills`. The platform owns loading, snapshotting, hashing, and
+verification. Each workload owns the declaration of where its sources
+live and which skills to load for interpreting them. Any workload points
+at its own architecture repository and skills — the resolution logic
+does not change. RHAI is one configuration of sources fed into generic
+resolution logic. Other workloads declare their own sources without code
+changes in the resolver.
 
-### Architecture context skill (from Nov 17 tech review)
+#### Architecture context skills (from Nov 17 tech review)
 
 Ralph proposed that agents should not reference the architecture context
-repository directly. Instead, each workload provides a skill that
-instructs the agent how to read that workload's architecture docs. The
-architecture context is loaded and snapshotted upfront — sources are
-fetched, pinned to a commit SHA, and content-hashed before the resolver
-runs. The skill does not fetch data at resolution time; it provides the
-interpretation guidance: which files to read, what the structure means,
-how to map component names to repos.
+repository directly. Instead, each workload declares which skills to
+load from its architecture source. The architecture context is loaded
+and snapshotted upfront — sources are fetched, pinned to a commit SHA,
+and content-hashed before the resolver runs. The skills do not fetch
+data at resolution time; they provide the interpretation guidance: which
+files to read, what the structure means, how to map component names to
+repos.
 
-For RHAI, the skill definition lives in the architecture-context repo
-itself (which already has 12 skills including `discover-components`,
-`repo-to-architecture-summary`, and `analyze-platform-components`). The
-skill instructs the agent how to read the RHAI docs — for example, how
-to use `component-map.json` to match candidates by type and tier. For
-another workload with different data sources — for example, a team that
-queries repos live instead of maintaining a static architecture-context
-repo — the skill instructs the agent how to get the same information
-from their source.
+For RHAI, the skills live in the architecture-context repo itself (which
+already has 12 skills including `discover-components`,
+`repo-to-architecture-summary`, and `analyze-platform-components`). They
+instruct the agent how to read the RHAI docs — for example, how to use
+`component-map.json` to match candidates by type and tier. For another
+workload with different data sources — for example, a team that queries
+repos live instead of maintaining a static architecture-context repo —
+the workload provides skills that get the same information from their
+source.
 
-This fits the resolver design: Layer 2 reads the pre-loaded architecture
-context using the interpretation guidance from the workload's skill,
-rather than hardcoding how to read a specific source. The skill abstracts
-what the data means and how to use it, so different workloads can provide
-different implementations without changing the resolver. This also
-addresses the scaling concern from the Nov 17 review — workloads that
-cannot afford to maintain a static architecture-context repo at scale
-can provide a skill that works differently.
-
-### Pluggable sources
-
-The component mapping, architecture context, and other sources are declared
-sources with the same structure: `id`, `url`, `ref`, `paths`, `role`.
-The platform owns loading, snapshotting, hashing, and verification.
-Each workload owns the declaration of where its sources live and how
-to read them.
-
-RHAI is one configuration of sources fed into generic resolution logic.
-Other workloads declare their own sources without code changes in the
-resolver.
+Layer 2 reads the pre-loaded architecture context using the
+interpretation guidance from the workload's declared skills, rather than
+hardcoding how to read a specific source. This also addresses the
+scaling concern from the Nov 17 review — workloads that cannot afford
+to maintain a static architecture-context repo at scale can provide
+skills that work differently.
 
 ### Verification
 
