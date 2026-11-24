@@ -281,13 +281,15 @@ and the cited sources. Unresolved work items still get an epic, but with
 an empty repo field and a comment carrying the reason, candidates, hint,
 and what evidence was available.
 
-**Step 5 — Review and publish.** The agent reviews the drafted epics
-(the existing REVIEW wave), then a staff engineer reviews the output
-before publication. The resolution evidence is included so the reviewer
-can verify each repo assignment — which layer resolved it, what text
-was cited, and what source versions were used. The repo URL is written
-to the configured Jira URL field. If sources have changed since
-resolution, the system forces re-resolution before publication.
+**Step 5 — Review and publish.** The agent self-reviews the drafted
+epics for consistency (correct repo URLs, evidence present, no
+unresolved items published without warning). Then a staff engineer
+reviews the output before publication. The resolution evidence is
+included so the reviewer can verify each repo assignment — which layer
+resolved it, what text was cited, and what source versions were used.
+The repo URL is written to the configured Jira URL field. If sources
+have changed since resolution, the system forces re-resolution before
+publication.
 
 ### Epic boundary shift: component → repo
 
