@@ -15,8 +15,8 @@ Output: artifacts/epic-reviews/{ID}-decomp-review.md
 1. Read the strategy file
 2. Read the decomposition summary
 3. Read all epic files matching `artifacts/epic-tasks/{ID}-E*.md` (excluding `-ai-signals.md` files)
-4. Read all AI signal rationale files matching `artifacts/epic-tasks/{ID}-E*-ai-signals.md`
-5. Read all conditional branch files matching `artifacts/epic-tasks/{ID}-BRANCH-*-E*.md` — the `{ID}-E*.md` glob in step 3 does **not** match these, so read them separately when the decomposition uses conditional branches.
+4. Read all conditional branch files matching `artifacts/epic-tasks/{ID}-BRANCH-*-E*.md` (excluding `-ai-signals.md` files) — the `{ID}-E*.md` glob in step 3 does **not** match these, so read them separately when the decomposition uses conditional branches.
+5. For every epic file from steps 3 and 4, read its AI signal rationale file at the exact same path with `.md` replaced by `-ai-signals.md` (e.g. `{ID}-E001.md` → `{ID}-E001-ai-signals.md`, `{ID}-BRANCH-A-E003.md` → `{ID}-BRANCH-A-E003-ai-signals.md`). Use the Read tool on that exact path — do **not** decide a rationale file is missing from a Glob/search result, because search results can be incomplete. Report a rationale file as missing only if reading its exact path fails.
 
 If the decomposition summary does not exist, create the review file with an error and stop:
 
@@ -82,7 +82,7 @@ Each epic type uses its own signal set: **Implementation** epics carry `ai_signa
 - **1**: Most signals are correct but 1-2 have arguable values (e.g., a borderline `existing_foundation` for a partially-greenfield Implementation epic, or a borderline `source_accessibility` for an Investigation), or signal rationales are present but thin.
 - **0**: Signal values contradict the rubric conditions (e.g. Implementation `open_questions: 1` despite unresolved questions; or an Investigation marking `source_accessibility: 1` when the answer is a pending human decision), or the type-appropriate signal field is missing from frontmatter, or the ai-signals file is missing.
 
-Check: For each epic, read `artifacts/epic-tasks/{ID}-ENNN-ai-signals.md` and verify the signal values in frontmatter (`ai_signals` for Implementation, `investigation_signals` for Investigation) against that rubric's conditions and the strategy content. Cross-check that the signal rationales match the frontmatter values. Do **not** check arithmetic or thresholds — `ai_implementability` and `ai_implementability_score` are computed by the pipeline, not the decompose agent.
+Check: For each epic (main-plan and conditional branch), use its AI signal rationale file read in step 5 and verify the signal values in frontmatter (`ai_signals` for Implementation, `investigation_signals` for Investigation) against that rubric's conditions and the strategy content. Cross-check that the signal rationales match the frontmatter values. Do **not** check arithmetic or thresholds — `ai_implementability` and `ai_implementability_score` are computed by the pipeline, not the decompose agent.
 
 ### Criterion 6: Acceptance Criteria Quality (0-2 points)
 

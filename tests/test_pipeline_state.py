@@ -9,12 +9,15 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from artifact_utils import read_frontmatter
+import pipeline_state
 from pipeline_state import PHASE_CONFIG, advance
 
 
 @pytest.fixture
 def workdir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Score computation shells out to scripts/ relative to cwd; not under test.
+    monkeypatch.setattr(pipeline_state, "_compute_ai_scores", lambda *_: None)
     for d in ("tmp", "artifacts/epic-reviews", "artifacts/epic-tasks"):
         (tmp_path / d).mkdir(parents=True)
     return tmp_path
@@ -155,3 +158,96 @@ class TestReviseWaveUsesReviseIds:
         assert _revise_ids(workdir) == ["RHAISTRAT-2"]
         assert (workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md").exists()
         assert not (workdir / "artifacts/epic-reviews/RHAISTRAT-2-decomp-review.md").exists()
+
+
+class TestReReviewAfterUnchangedRevision:
+    """AISDLC-172: revision made no edits, but the review still says pass: false."""
+
+    def _revise(self, workdir, reviews, revised):
+        _setup(workdir, reviews)
+        advance({"phase": "REVIEW_DECOMP"})
+        for strat_id in reviews:
+            _write_md(workdir / f"artifacts/epic-tasks/{strat_id}-decomposition.md",
+                      {"parent_strat": strat_id, "epic_count": 2,
+                       "critical_path_length": 2, "revised": revised})
+
+    def test_failed_review_is_re_reviewed_without_edits(self, workdir):
+        self._revise(workdir, {"RHAISTRAT-1": FAIL}, revised=False)
+        nxt, _ = advance({"phase": "RE_REVIEW_CHECK", "revise_cycle": 0})
+        assert nxt == "RE_REVIEW"
+        assert _revise_ids(workdir) == ["RHAISTRAT-1"]
+        # Stale pass: false is removed so the poller waits for a fresh review.
+        assert not (workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md").exists()
+
+    def test_pass_with_minor_issues_not_re_reviewed_without_edits(self, workdir):
+        self._revise(workdir, {"RHAISTRAT-1": MINOR}, revised=False)
+        nxt, _ = advance({"phase": "RE_REVIEW_CHECK", "revise_cycle": 0})
+        assert nxt == "BATCH_DONE"
+        assert (workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md").exists()
+
+    def _run_loop(self, workdir, state, re_review_result):
+        """Drive RE_REVIEW_CHECK onward, faking agents; return re-review count.
+
+        Each re-review writes ``re_review_result``; each revise makes no edits.
+        """
+        review = workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md"
+        decomp = workdir / "artifacts/epic-tasks/RHAISTRAT-1-decomposition.md"
+        re_reviews = 0
+        for _ in range(20):
+            nxt, _ = advance(state)
+            if nxt == "RE_REVIEW":
+                re_reviews += 1
+                _write_md(review, {"strat_id": "RHAISTRAT-1", **re_review_result})
+            elif nxt == "RE_REVISE":
+                _write_md(decomp, {"parent_strat": "RHAISTRAT-1", "epic_count": 2,
+                                   "critical_path_length": 2, "revised": False})
+            state["phase"] = nxt
+            if nxt == "BATCH_DONE":
+                return re_reviews
+        raise AssertionError("revise loop did not terminate")
+
+    def test_false_negative_recovers_on_re_review(self, workdir):
+        """The ticket scenario: one false rejection, then a passing re-review."""
+        self._revise(workdir, {"RHAISTRAT-1": FAIL}, revised=False)
+        state = {"phase": "RE_REVIEW_CHECK", "revise_cycle": 0}
+        assert self._run_loop(workdir, state, CLEAN) == 1
+        data, _ = read_frontmatter(
+            str(workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md"))
+        assert data["pass"] is True
+
+    def test_repeated_false_negative_terminates_at_cycle_cap(self, workdir):
+        """Reviewer keeps failing, revise keeps making no edits: loop still ends."""
+        self._revise(workdir, {"RHAISTRAT-1": FAIL}, revised=False)
+        state = {"phase": "RE_REVIEW_CHECK", "revise_cycle": 0}
+        assert self._run_loop(workdir, state, FAIL) == 3
+        assert state["revise_cycle"] == 2
+
+    def test_missing_review_is_re_reviewed(self, workdir):
+        self._revise(workdir, {"RHAISTRAT-1": FAIL}, revised=False)
+        (workdir / "artifacts/epic-reviews/RHAISTRAT-1-decomp-review.md").unlink()
+        nxt, _ = advance({"phase": "RE_REVIEW_CHECK", "revise_cycle": 0})
+        assert nxt == "RE_REVIEW"
+
+    def test_contradictory_pass_is_re_reviewed_without_edits(self, workdir):
+        """pass: true that contradicts its own score/recommendation is not approval."""
+        contradictory = {**FAIL, "pass": True}
+        self._revise(workdir, {"RHAISTRAT-1": contradictory}, revised=False)
+        nxt, _ = advance({"phase": "RE_REVIEW_CHECK", "revise_cycle": 0})
+        assert nxt == "RE_REVIEW"
+
+    def test_re_review_missing_pass_field_is_revised_again(self, workdir):
+        _setup(workdir, {"RHAISTRAT-1": {k: v for k, v in CLEAN.items() if k != "pass"}})
+        (workdir / "tmp/pipeline-revise-ids.txt").write_text("RHAISTRAT-1\n")
+        nxt, _ = advance({"phase": "REVISE_CHECK", "revise_cycle": 0})
+        assert nxt == "RE_REVISE"
+
+    def test_each_batch_gets_its_own_revise_cycles(self, workdir):
+        """revise_cycle from batch 1 must not shrink batch 2's allowance."""
+        (workdir / "tmp/pipeline-batch-2-ids.txt").write_text("RHAISTRAT-1\n")
+        state = {"phase": "BATCH_START", "batch": 1, "revise_cycle": 2}
+        nxt, _ = advance(state)
+        assert nxt == "FETCH"
+        assert state["revise_cycle"] == 0
+        self._revise(workdir, {"RHAISTRAT-1": FAIL}, revised=False)
+        state["phase"] = "RE_REVIEW_CHECK"
+        assert self._run_loop(workdir, state, FAIL) == 3
