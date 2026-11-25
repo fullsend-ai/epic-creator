@@ -57,6 +57,28 @@ For each issue in the review's `issues` list, apply the appropriate correction:
 ### Completeness issues
 - **Missing strategy scope**: Create new epic(s) to cover the gap. Follow the same frontmatter schema and body structure as existing epics. Assign new epic IDs continuing the sequence.
 
+### Repository issues (repository mode only)
+
+Apply only when the variables above this prompt include
+`REPOSITORY_MODE=true`.
+
+- Never edit a result file under `artifacts/repo-resolution/`, never
+  invent a repository key, and never pick a repository yourself.
+- **Wrong or missing `repository_key`:** set it to a key from the epic's
+  verified result (`repository_resolution`), or to `null` when that result
+  is unresolved.
+- **Epic spans two repositories:** split it into one epic per repository,
+  with a `dependencies` edge between them, each pointing at a result that
+  contains its repository.
+- **Work that needs a repository outside every verified result:** resolve
+  that epic on its own, following the "Repository mode" item 4 of
+  `skills/epic-decompose/prompts/decompose-agent.md` (request, skill,
+  verify), then set its fields from the new result.
+- Update the summary's **Repository Map** to match.
+- Before finishing, run
+  `python3 scripts/repository_resolution.py check-epics {ID}` and fix
+  every problem it reports.
+
 **When rewriting or adding epic body content:** Do not reference sibling epics by draft ID (e.g., "E001", "E003"). Describe dependencies in plain terms (e.g., "the OTEL env var injection capability" not "E003"). Draft IDs are internal to the decomposition and meaningless in Jira.
 
 ## Step 3: Update Decomposition Summary

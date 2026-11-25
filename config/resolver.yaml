@@ -1,0 +1,48 @@
+# Repository resolution configuration (ADR-0176).
+#
+# Read only when EPIC_CREATOR_REPOSITORY_MODE=true. When the flag is unset or false this
+# file is never opened, so a broken file cannot fail a legacy run.
+#
+# Validated against config/_schema/resolver.schema.json before any source is
+# fetched. Any error here stops the run before resolution starts.
+
+version: 1
+
+# The configuration group this file declares.
+group: rhai
+
+# Declared sources. The loader fetches each one, resolves `ref` to a commit
+# SHA, snapshots the declared `paths`, and records a content hash.
+# `url` is credential-free HTTPS or `self` (this repository at its HEAD).
+sources:
+  - id: architecture
+    url: https://github.com/opendatahub-io/architecture-context
+    ref: main
+    # Pinned product version. Moving to a new version is a deliberate
+    # change to this file by the group.
+    paths:
+      - architecture/rhoai-3.6/
+      - overlays/
+    role: architecture
+
+  # Jira component -> repository keys (Phase 1 hints), kept in this
+  # repository and pinned to its HEAD.
+  - id: mapping
+    url: self
+    ref: HEAD
+    paths:
+      - config/rhai/component-repositories.yaml
+    role: mapping
+
+# Where repository keys resolve to namespace path and name.
+repository_data:
+  source: architecture
+  path: architecture/rhoai-3.6/component-map.json
+  # The component map records namespace path and name but no host. The
+  # canonical URL is https://<host>/<namespace path>/<name>, all lowercase.
+  host: github.com
+
+# Consumer settings for epic-creator.
+jira:
+  # URL-type field on the epic that receives the canonical repository URL.
+  repository_url_field: customfield_10933

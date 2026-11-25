@@ -685,3 +685,51 @@ class TestStrategySearchPagination:
         with patch("fetch_strategy.search_issues_page", side_effect=pages):
             with pytest.raises(JiraReadError, match="pagination progress"):
                 _search_issues("s", "u", "t", "some jql")
+
+
+class TestStrategyComponents:
+    """Jira components are captured as optional resolution hints (ADR-0176)."""
+
+    def _issue(self, components):
+        fields = {"summary": "Test Strategy", "description": "Body",
+                  "labels": [], "issuelinks": [], "status": {"name": "Refined"},
+                  "priority": {"name": "Major"}, "attachment": []}
+        if components is not None:
+            fields["components"] = components
+        return {"key": "RHAISTRAT-9001", "fields": fields}
+
+    def _frontmatter(self, path):
+        with open(path) as f:
+            return yaml.safe_load(f.read().split("---\n")[1])
+
+    def test_records_component_names(self, tmp_path):
+        issue = self._issue([{"id": "1", "name": "AI Core Dashboard"},
+                             {"id": "2", "name": "Model Serving"}])
+        path = _write_strategy(issue, output_dir=str(tmp_path))
+        assert self._frontmatter(path)["components"] == [
+            "AI Core Dashboard", "Model Serving"]
+
+    @pytest.mark.parametrize("components", [None, [], [{"id": "1"}]],
+                             ids=["field-absent", "empty", "no-name"])
+    def test_missing_components_record_empty_list(self, tmp_path, components):
+        path = _write_strategy(self._issue(components), output_dir=str(tmp_path))
+        assert self._frontmatter(path)["components"] == []
+
+    def test_search_requests_components(self):
+        with patch("fetch_strategy.search_issues_page",
+                   return_value=([], None)) as search:
+            _search_issues("s", "u", "t", "some jql")
+        assert "components" in search.call_args.kwargs["fields"].split(",")
+
+    def test_fetch_one_requests_components(self):
+        with patch("fetch_strategy.get_issue", return_value=None) as get_issue:
+            from fetch_strategy import _fetch_issue
+            _fetch_issue("s", "u", "t", "RHAISTRAT-9001")
+        assert "components" in get_issue.call_args.kwargs["fields"]
+
+    def test_schema_accepts_components(self, tmp_path):
+        from artifact_utils import read_frontmatter_validated
+        issue = self._issue([{"id": "1", "name": "AI Core Dashboard"}])
+        path = _write_strategy(issue, output_dir=str(tmp_path / "strat-tasks"))
+        data, _ = read_frontmatter_validated(path, "strat-task")
+        assert data["components"] == ["AI Core Dashboard"]

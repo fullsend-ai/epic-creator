@@ -1,0 +1,87 @@
+# RHAI Jira component -> repository keys (ADR-0176 Phase 1 hints).
+#
+# Source: "Component Mapping Results" Google document
+#   https://docs.google.com/document/d/1Hv34Ci58_BIhWmWJXKE34w2ZlQrQWMeg_fjvMsv4Erk/edit
+#   snapshot retrieved 2026-11-01, revision
+#   AHj4eMS4Dy5ONxWF49VeIk2PfSgCM-ISEh75GNSwiH9CiredGYRpmzSJZZB9Q7oPgliqBgmoxWqU7yu_QjROTUJbAgy9ZmWaeM-ekQONCv4
+#   ("Repos" section: Direct Repos (RHOAIENG) and Embedded Repos (RHAIENG)).
+# Converted 2026-11-25: org/name resolved to repository keys against
+#   opendatahub-io/architecture-context architecture/rhoai-3.6/component-map.json
+#   at 9fba53d415b6399dba720aa76204eb3a00c42b09.
+#   Repositories absent from that component map are omitted (71 of 119).
+#
+# Hints only: Phase 2 confirms or overrides every hint with architecture
+# evidence. Every key must exist in the pinned component map, or the run
+# stops at load time.
+
+components:
+  AI Core Dashboard:
+  - odh-dashboard
+  AI Core Platform:
+  - kube-auth-proxy
+  - kube-rbac-proxy
+  - must-gather
+  - odh-cli
+  - odh-gitops
+  - rhods-operator
+  AI Evaluations:
+  - eval-hub
+  - trustyai-explainability
+  - trustyai-service-operator
+  AI Hub:
+  - model-metadata-collection
+  - model-registry
+  - model-registry-operator
+  AI Pipelines:
+  - argo-workflows
+  - data-science-pipelines
+  - data-science-pipelines-operator
+  - ml-metadata
+  - pipelines-components
+  AI Safety:
+  - NeMo-Guardrails
+  - fms-guardrails-orchestrator
+  - guardrails-detectors
+  - guardrails-regex-detector
+  - lm-evaluation-harness
+  Build and Release:
+  - rhoai-additional-images
+  Feature Store:
+  - feast
+  Inference Gateway:
+  - ai-gateway-payload-processing
+  KubeRay:
+  - kuberay
+  Kubeflow Spark Operator:
+  - spark-operator
+  MLflow:
+  - mlflow
+  - mlflow-operator
+  Model Runtimes:
+  - MLServer
+  - openvino_model_server
+  - vllm-cpu
+  - vllm-gaudi
+  Model Serving:
+  - kserve
+  - odh-model-controller
+  - vllm-orchestrator-gateway
+  Model as a Service:
+  - models-as-a-service
+  Notebooks Server:
+  - kubeflow
+  - notebooks
+  Training Kubeflow:
+  - trainer
+  - training-operator
+  Workload Orchestration:
+  - distributed-workloads
+  AgentDev:
+  - agentic-starter-kits
+  AutoML:
+  - kserve-autogluon-server
+  Llama Stack Core:
+  - llama-stack-provider-trustyai-garak
+  llm-d:
+  - batch-gateway
+  - workload-variant-autoscaler
