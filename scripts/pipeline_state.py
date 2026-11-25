@@ -178,6 +178,24 @@ def _reset_revised_flag(decomp_path):
             f.write(body)
 
 
+def _review_passed(review_path):
+    """Whether the review approves the decomposition (issues allowed).
+
+    Same criteria as the REVIEW_DECOMP clean-pass check, minus ``issues``:
+    a missing, unreadable, errored or self-contradictory review is not a pass.
+    """
+    from artifact_utils import read_frontmatter
+    try:
+        data, _ = read_frontmatter(review_path)
+    except Exception:
+        return False
+    score = data.get("score") if data else None
+    return bool(data and data.get("pass") is True
+                and data.get("recommendation") == "accept"
+                and isinstance(score, int) and score >= 10
+                and not data.get("error"))
+
+
 def _run_script(cmd):
     result = subprocess.run(
         cmd, shell=True, capture_output=True, text=True)
@@ -218,6 +236,7 @@ def advance(state, dry_run=False):
         batch = state.get("batch", 0) + 1
         if not dry_run:
             state["batch"] = batch
+            state["revise_cycle"] = 0
             batch_file = f"tmp/pipeline-batch-{batch}-ids.txt"
             _copy_ids(batch_file, "tmp/pipeline-active-ids.txt")
         return "FETCH", f"BATCH_START → FETCH: batch={batch}"
@@ -275,22 +294,27 @@ def advance(state, dry_run=False):
             _compute_ai_scores("tmp/pipeline-revise-ids.txt")
         return "RE_REVIEW_CHECK", "REVISE_DECOMP → RE_REVIEW_CHECK"
 
-    # --- RE_REVIEW_CHECK: did revision change anything? ---
+    # --- RE_REVIEW_CHECK: did revision change anything, or is the review still failing? ---
     if phase == "RE_REVIEW_CHECK":
         from artifact_utils import read_frontmatter
         check_ids = _read_ids("tmp/pipeline-revise-ids.txt")
         revised_ids = []
         for strat_id in check_ids:
             decomp_path = f"artifacts/epic-tasks/{strat_id}-decomposition.md"
+            review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
             if os.path.exists(decomp_path):
                 try:
                     data, _ = read_frontmatter(decomp_path)
-                    if data and data.get("revised"):
+                    # Re-review a failed review even when revision made no
+                    # changes: the failure may be a reviewer false negative,
+                    # and a stale pass: false would block submission.
+                    if data and (data.get("revised")
+                                 or not _review_passed(review_path)):
                         revised_ids.append(strat_id)
                 except Exception:
                     pass
         if not revised_ids:
-            return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: revision made no changes"
+            return "BATCH_DONE", "RE_REVIEW_CHECK → BATCH_DONE: no changes and reviews passing"
         if not dry_run:
             _write_ids("tmp/pipeline-revise-ids.txt", revised_ids)
             # Delete old review files so the poller can detect fresh reviews
@@ -299,7 +323,7 @@ def advance(state, dry_run=False):
                 if os.path.exists(review_path):
                     os.remove(review_path)
         return ("RE_REVIEW",
-                f"RE_REVIEW_CHECK → RE_REVIEW: {len(revised_ids)} revised")
+                f"RE_REVIEW_CHECK → RE_REVIEW: {len(revised_ids)} to re-review")
 
     # --- RE_REVIEW → REVISE_CHECK ---
     if phase == "RE_REVIEW":
@@ -307,18 +331,12 @@ def advance(state, dry_run=False):
 
     # --- REVISE_CHECK: only revise again if review fails, with cycle cap ---
     if phase == "REVISE_CHECK":
-        from artifact_utils import read_frontmatter
         revise_ids = _read_ids("tmp/pipeline-revise-ids.txt")
         failing_ids = []
         for strat_id in revise_ids:
             review_path = f"artifacts/epic-reviews/{strat_id}-decomp-review.md"
-            if os.path.exists(review_path):
-                try:
-                    data, _ = read_frontmatter(review_path)
-                    if data and not data.get("pass", True):
-                        failing_ids.append(strat_id)
-                except Exception:
-                    pass
+            if not _review_passed(review_path):
+                failing_ids.append(strat_id)
         cycle = state.get("revise_cycle", 0)
         if failing_ids and cycle < 2:
             if not dry_run:
