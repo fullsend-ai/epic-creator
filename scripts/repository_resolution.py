@@ -75,6 +75,28 @@ def load_sources(config=CONFIG_PATH, out=SOURCES_DIR):
     return f"{out}/manifest.json"
 
 
+def ensure_sources(config=CONFIG_PATH, out=SOURCES_DIR):
+    """Reuse sources already loaded for this configuration, else load them.
+
+    The fullsend pre-script loads sources on the host (the sandbox has no
+    GitHub access). A manifest is reused only when it was produced from the
+    current configuration file and every snapshot directory is present.
+    """
+    import hashlib
+    from sources import SourceConfigError, read_manifest
+    manifest_path = f"{out}/manifest.json"
+    if os.path.exists(manifest_path):
+        manifest, root = read_manifest(manifest_path)
+        try:
+            digest = hashlib.sha256(Path(config).read_bytes()).hexdigest()
+        except OSError as e:
+            raise SourceConfigError(f"cannot read {config}: {e.strerror}") from e
+        if manifest.get("config_digest") == digest and all(
+                (Path(root) / s["snapshot"]).is_dir() for s in manifest["sources"]):
+            return manifest_path
+    return load_sources(config, out)
+
+
 def prepare_request(strat_id):
     """Write the resolver request (description + components) for a strategy."""
     from artifact_utils import read_frontmatter

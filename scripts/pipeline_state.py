@@ -469,9 +469,10 @@ def cmd_init(args):
     opts = parser.parse_args(args)
 
     # Feature flag (ADR-0176). Off: resolver.yaml is never read. On: the
-    # declared sources are validated and loaded now, so a broken config or
-    # an unfetchable source stops the run before any work starts.
-    from repository_resolution import FlagError, load_sources, repository_mode
+    # declared sources are validated and loaded now (or reused when the
+    # host pre-script already loaded them), so a broken config or an
+    # unfetchable source stops the run before any work starts.
+    from repository_resolution import FlagError, ensure_sources, repository_mode
     try:
         repo_mode = repository_mode()
     except FlagError as e:
@@ -481,7 +482,7 @@ def cmd_init(args):
     if repo_mode:
         from sources import SourceError
         try:
-            manifest = load_sources()
+            manifest = ensure_sources()
         except SourceError as e:
             print(f"ERROR [{e.kind}]: repository resolution sources: {e}",
                   file=sys.stderr)

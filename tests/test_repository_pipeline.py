@@ -48,6 +48,7 @@ class TestInit:
         def fail(*a, **k):
             raise AssertionError("resolver config must not be read when off")
         monkeypatch.setattr(repository_resolution, "load_sources", fail)
+        monkeypatch.setattr(repository_resolution, "ensure_sources", fail)
         state = _init(monkeypatch)
         assert state["repository_mode"] is False
         assert "resolution_manifest" not in state
@@ -66,7 +67,7 @@ class TestInit:
 
     def test_flag_on_loads_sources_at_init(self, workdir, monkeypatch):
         monkeypatch.setenv(FLAG, "true")
-        monkeypatch.setattr(repository_resolution, "load_sources",
+        monkeypatch.setattr(repository_resolution, "ensure_sources",
                             lambda: "tmp/repo-resolution/sources/manifest.json")
         state = _init(monkeypatch)
         assert state["repository_mode"] is True
@@ -79,7 +80,7 @@ class TestInit:
         def fail():
             raise SourceFetchError("fetching https://example.com/arch failed")
         monkeypatch.setenv(FLAG, "true")
-        monkeypatch.setattr(repository_resolution, "load_sources", fail)
+        monkeypatch.setattr(repository_resolution, "ensure_sources", fail)
         with pytest.raises(SystemExit):
             _init(monkeypatch)
         assert "ERROR [fetch]" in capsys.readouterr().err
@@ -295,3 +296,91 @@ class TestCheckEpics:
     def test_review_and_revise_get_repository_vars(self):
         for phase in ("REVIEW_DECOMP", "REVISE_DECOMP", "RE_REVIEW", "RE_REVISE"):
             assert PHASE_CONFIG[phase]["repository_vars"]["REPOSITORY_MODE"] == "true"
+
+
+class TestEnsureSources:
+    def _loaded(self, workdir, config_text):
+        import hashlib
+        config = workdir / "resolver.yaml"
+        config.write_text(config_text)
+        out = workdir / "sources"
+        (out / "architecture").mkdir(parents=True)
+        (out / "manifest.json").write_text(json.dumps({
+            "config_digest": hashlib.sha256(config_text.encode()).hexdigest(),
+            "sources": [{"id": "architecture", "snapshot": "architecture"}]}))
+        return str(config), str(out)
+
+    def test_reuses_manifest_loaded_for_same_config(self, workdir, monkeypatch):
+        config, out = self._loaded(workdir, "version: 1\n")
+        monkeypatch.setattr(repository_resolution, "load_sources",
+                            lambda *a, **k: pytest.fail("must reuse"))
+        assert repository_resolution.ensure_sources(config, out) == \
+            f"{out}/manifest.json"
+
+    def test_reloads_when_config_changed(self, workdir, monkeypatch):
+        config, out = self._loaded(workdir, "version: 1\n")
+        (workdir / "resolver.yaml").write_text("version: 2\n")
+        calls = []
+        monkeypatch.setattr(repository_resolution, "load_sources",
+                            lambda c, o: calls.append(c) or f"{o}/manifest.json")
+        repository_resolution.ensure_sources(config, out)
+        assert calls == [config]
+
+    def test_loads_when_nothing_loaded(self, workdir, monkeypatch):
+        calls = []
+        monkeypatch.setattr(repository_resolution, "load_sources",
+                            lambda c, o: calls.append(o) or f"{o}/manifest.json")
+        repository_resolution.ensure_sources("resolver.yaml", "nowhere")
+        assert calls == ["nowhere"]
+
+
+class TestHarnessWiring:
+    ROOT = os.path.join(os.path.dirname(__file__), "..")
+
+    def test_sandbox_receives_flag_through_env_file(self):
+        with open(os.path.join(self.ROOT, ".fullsend/epic-creator/epic-creator.yaml")) as f:
+            harness = yaml.safe_load(f)
+        entry = next(h for h in harness["host_files"]
+                     if h["src"] == "epic-creator/repository-mode.env")
+        assert entry["expand"] is True
+        assert entry["dest"].startswith("/sandbox/workspace/.env.d/")
+        with open(os.path.join(self.ROOT, ".fullsend/epic-creator/repository-mode.env")) as f:
+            assert "EPIC_CREATOR_REPOSITORY_MODE=${EPIC_CREATOR_REPOSITORY_MODE}" in f.read()
+
+    def _pre_script(self, workdir, flag):
+        import shutil
+        import subprocess
+        repo = workdir / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        for name in ("fetch-architecture-context.sh", "fetch_components.py"):
+            (repo / "scripts" / name).write_text("")
+        log = workdir / "calls.log"
+        (repo / "scripts" / "repository_resolution.py").write_text(
+            "import os, sys\n"
+            f"open({str(log)!r}, 'a').write(sys.argv[1] + '\\n')\n"
+            "v = os.environ.get('EPIC_CREATOR_REPOSITORY_MODE', '')\n"
+            "if sys.argv[1] == 'flag':\n"
+            "    if v not in ('', 'true', 'false'): sys.exit(2)\n"
+            "    print('on' if v == 'true' else 'off')\n")
+        env = dict(os.environ, TARGET_REPO_DIR=str(repo))
+        env.pop("EPIC_CREATOR_REPOSITORY_MODE", None)
+        if flag is not None:
+            env["EPIC_CREATOR_REPOSITORY_MODE"] = flag
+        script = os.path.join(self.ROOT, ".fullsend/epic-creator/pre-epic-creator.sh")
+        result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+        calls = log.read_text().split() if log.exists() else []
+        return result.returncode, calls
+
+    def test_pre_script_loads_sources_only_when_on(self, workdir):
+        assert self._pre_script(workdir, "true") == (0, ["flag", "load"])
+
+    @pytest.mark.parametrize("flag", [None, ""])
+    def test_pre_script_untouched_when_unset(self, workdir, flag):
+        assert self._pre_script(workdir, flag) == (0, [])
+
+    def test_pre_script_skips_loading_when_false(self, workdir):
+        assert self._pre_script(workdir, "false") == (0, ["flag"])
+
+    def test_pre_script_stops_on_malformed_flag(self, workdir):
+        code, calls = self._pre_script(workdir, "yes")
+        assert code != 0 and calls == ["flag"]
