@@ -45,8 +45,10 @@ repository yourself. Repository keys come only from verified result files.
    item on its own, once:
    - Write `artifacts/repo-resolution/{ID}-ENNN-request.json` with
      `{"description": "<the work item's scope, in plain words>",
-     "components": [<the strategy's components>]}`, using the epic's own
-     number.
+     "components": <the strategy's components>}`, using the epic's own
+     number. Copy `components` exactly from the `components` list in the
+     strategy file's frontmatter (`[]` when it is empty). Never use the
+     epic's `component` field or any component you chose yourself.
    - Read `SKILL_DIR/SKILL.md` and follow it with that request,
      `MANIFEST`, and result path
      `artifacts/repo-resolution/{ID}-ENNN-result.json`.
