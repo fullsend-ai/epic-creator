@@ -18,6 +18,7 @@ from artifact_utils import read_frontmatter
 
 PHASE_CHECKS = {
     "fetch": lambda id: f"artifacts/strat-tasks/{id}.md",
+    "resolve": lambda id: f"artifacts/repo-resolution/{id}-result.json",
     "decompose": lambda id: f"artifacts/epic-tasks/{id}-decomposition.md",
     "review_decomp": lambda id: f"artifacts/epic-reviews/{id}-decomp-review.md",
     "revise_decomp": lambda id: f"artifacts/epic-tasks/{id}-decomposition.md",

@@ -22,8 +22,8 @@ import yaml
 
 
 def _fetch_issue(server, user, token, key):
-    fields = ["summary", "description", "labels", "issuelinks", "status",
-              "priority", "attachment"]
+    fields = ["summary", "description", "labels", "components", "issuelinks",
+              "status", "priority", "attachment"]
     return get_issue(server, user, token, key, fields=fields)
 
 
@@ -54,6 +54,9 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
     title = fields.get("summary", "")
     desc_raw = fields.get("description")
     labels = fields.get("labels", [])
+    # Jira components are optional resolution hints (ADR-0176 Phase 1).
+    components = [c["name"] for c in (fields.get("components") or [])
+                  if isinstance(c, dict) and c.get("name")]
     status = fields.get("status", {}).get("name", "")
     priority = fields.get("priority", {}).get("name", "")
 
@@ -104,6 +107,7 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
         "status": status,
         "priority": priority,
         "labels": labels if labels else [],
+        "components": components,
         "links": links if links else [],
     }
     if attachment_source:
@@ -123,7 +127,8 @@ def _write_strategy(issue_data, output_dir="artifacts/strat-tasks",
 def _search_issues(server, user, token, jql, limit=100):
     """Search for issues using JQL with pagination via /search/jql."""
     all_issues = []
-    fields = "summary,description,labels,issuelinks,status,priority,attachment"
+    fields = ("summary,description,labels,components,issuelinks,status,"
+              "priority,attachment")
     next_page_token = None
     seen_tokens = set()
 

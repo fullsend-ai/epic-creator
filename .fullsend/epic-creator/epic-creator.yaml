@@ -16,6 +16,9 @@ host_files:
   - src: epic-creator/gcp-vertex.env
     dest: /sandbox/workspace/.env.d/gcp-vertex.env
     expand: true
+  - src: epic-creator/repository-mode.env
+    dest: /sandbox/workspace/.env.d/repository-mode.env
+    expand: true
   - src: ${GOOGLE_APPLICATION_CREDENTIALS}
     dest: /tmp/.gcp-credentials.json
 

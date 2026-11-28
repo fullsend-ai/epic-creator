@@ -26,6 +26,41 @@ python3 scripts/frontmatter.py set artifacts/epic-reviews/{ID}-decomp-review.md 
     error="decomposition summary missing"
 ```
 
+## Step 1.4: Repository Check (repository mode only)
+
+Apply this step **only** when the variables above this prompt include
+`REPOSITORY_MODE=true`. Otherwise skip it.
+
+Run the deterministic check and read its output:
+
+```bash
+python3 scripts/repository_resolution.py check-epics {ID}
+```
+
+- Exit 0: every epic names a verified result, and its `repository_key`
+  matches that result (or is null for an unresolved result).
+- Exit 1: each listed problem is a **critical** issue under Criterion 3
+  (Epic Boundaries) — score that criterion 0. This covers a missing or
+  wrong repository assignment, missing evidence, and an unresolved epic
+  without its unresolved result (it would publish without its warning).
+- Exit 2: configuration or source failure. Write the review with
+  `error="repository check failed: <message>"` and stop.
+
+Then, under Criterion 3, also check by reading the epics:
+
+- Each epic is one planned PR in exactly one repository. An epic whose
+  scope clearly needs changes in a second repository is a **major** issue.
+- Distinct changes in the same repository (e.g. an API change and a
+  dependent operator change, or code versus documentation) are separate
+  epics; one coherent change is not split across epics without reason.
+- An unresolved epic is not merged with other work.
+- The decomposition summary has a **Repository Map** table that matches
+  the epics' frontmatter (a mismatch is a **minor** issue).
+
+Do not judge whether the cited evidence is the right repository — that is
+the staff reviewer's call, and the check above already confirms the
+evidence exists.
+
 ## Step 1.5: Triage Consistency Check
 
 Before scoring criteria, check for a structural contradiction:

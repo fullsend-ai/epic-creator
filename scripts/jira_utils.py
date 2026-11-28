@@ -393,8 +393,13 @@ def add_comment(server, user, token, issue_key, body_adf):
 
 def create_issue(server, user, token, project, issue_type, summary,
                  description_adf, priority, labels=None, components=None,
-                 parent_key=None, assignee_id=None, retry_ambiguous=True):
-    """POST /rest/api/3/issue — returns the created issue key."""
+                 parent_key=None, assignee_id=None, retry_ambiguous=True,
+                 extra_fields=None):
+    """POST /rest/api/3/issue — returns the created issue key.
+
+    extra_fields: optional {field_id: value} merged into the create body,
+    e.g. a configured URL custom field.
+    """
     body = {
         "fields": {
             "project": {"key": project},
@@ -412,6 +417,8 @@ def create_issue(server, user, token, project, issue_type, summary,
         body["fields"]["parent"] = {"key": parent_key}
     if assignee_id:
         body["fields"]["assignee"] = {"accountId": assignee_id}
+    for field_id, value in (extra_fields or {}).items():
+        body["fields"][field_id] = value
     result = api_call_with_retry(server, "/issue", user, token, body=body,
                                  retry_ambiguous=retry_ambiguous)
     return result["key"]

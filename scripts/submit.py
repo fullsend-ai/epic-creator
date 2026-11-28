@@ -46,10 +46,13 @@ from jira_utils import (
     verify_jira_auth,
     has_existing_epics,
     add_attachment,
+    add_comment,
+    adf_to_markdown,
     api_call,
     create_issue,
     create_issue_link,
     add_labels,
+    get_comments,
     get_issue,
     markdown_to_adf,
     strip_metadata,
@@ -327,6 +330,14 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
             # Components list (empty if no mapping)
             components = [entry["component"]] if entry["component"] else []
 
+            # Repository mode (ADR-0176): the canonical URL goes into the
+            # configured URL field at create time; unresolved epics leave it
+            # empty and get a warning comment after creation.
+            repo = entry.get("repository")
+            extra_fields = None
+            if repo and repo["status"] == "resolved":
+                extra_fields = {repo["field_id"]: repo["url"]}
+
             jira_key = create_issue(
                 server, user, token,
                 project=TARGET_PROJECT,
@@ -339,6 +350,7 @@ def _create_epics(server, user, token, plan, strat_id, assignee_id=None):
                 parent_key=strat_id,
                 assignee_id=assignee_id,
                 retry_ambiguous=False,
+                extra_fields=extra_fields,
             )
         except Exception as e:
             print(f"  ERROR creating {epic_id}: {e}", file=sys.stderr)
@@ -563,6 +575,94 @@ def _attach_frontmatter(server, user, token, plan, id_to_jira_key):
     return errors
 
 
+# ─── Repository mode (ADR-0176) ──────────────────────────────────────────────
+
+def _check_repository_field(server, user, token, field_id):
+    """Fail before any write unless field_id is a URL field on the Epic
+    create screen of the target project. Raises JiraReadError."""
+    types = api_call(server, f"/issue/createmeta/{TARGET_PROJECT}/issuetypes",
+                     user, token)
+    entries = types.get("issueTypes") or types.get("values") or []
+    epic = next((t for t in entries if t.get("name") == TARGET_ISSUE_TYPE), None)
+    if not epic:
+        raise JiraReadError(f"{TARGET_ISSUE_TYPE} is not creatable in "
+                            f"{TARGET_PROJECT}.")
+    start = 0
+    while True:
+        page = api_call(
+            server, f"/issue/createmeta/{TARGET_PROJECT}/issuetypes/"
+                    f"{epic['id']}?startAt={start}&maxResults=100", user, token)
+        fields = page.get("fields") or page.get("values") or []
+        for field in fields:
+            if field.get("fieldId") == field_id:
+                custom = (field.get("schema") or {}).get("custom", "")
+                if not custom.endswith(":url"):
+                    raise JiraReadError(
+                        f"Repository field {field_id} is not a URL field.")
+                return
+        total = page.get("total")
+        start += len(fields)
+        if not fields or page.get("isLast") or (total is not None and start >= total):
+            break
+    raise JiraReadError(f"Repository field {field_id} is not on the "
+                        f"{TARGET_PROJECT} {TARGET_ISSUE_TYPE} create screen.")
+
+
+def _attach_repositories(strat_id, epics, plan):
+    """Check every epic's repository and attach what to publish to the plan.
+
+    Returns an error string (nothing may be written) or None.
+    """
+    from repository_resolution import check_epics, publication
+    try:
+        problems = check_epics(strat_id)
+        if problems:
+            return "; ".join(problems)
+        by_path = {path: data for path, data, _ in epics}
+        for entry in plan:
+            entry["repository"] = publication(by_path[entry["path"]])
+    except Exception as e:
+        return f"repository check failed: {safe_error_message(e)}"
+    return None
+
+
+def _publish_repository_info(server, user, token, plan, id_to_jira_key):
+    """Attach evidence to resolved epics; warn on unresolved ones.
+
+    Idempotent: the evidence attachment is replaced, and the warning comment
+    is only added when no earlier one is present. Returns error count.
+    """
+    from repository_resolution import COMMENT_MARKER
+    errors = 0
+    for entry in plan:
+        repo = entry.get("repository")
+        jira_key = id_to_jira_key.get(entry["epic_id"])
+        if not repo or not jira_key:
+            continue
+        try:
+            if repo["status"] == "resolved":
+                filename = f"{jira_key}-repository-evidence.md"
+                existing = _get_existing_attachments(server, user, token, jira_key)
+                action = _replace_attachment(server, user, token, jira_key,
+                                             filename, repo["evidence_md"],
+                                             existing)
+                print(f"  {action.title()} {filename} on {jira_key}")
+            else:
+                comments = get_comments(server, user, token, jira_key)
+                if any(COMMENT_MARKER in adf_to_markdown(c.get("body") or {})
+                       for c in comments):
+                    print(f"  SKIP warning comment on {jira_key} (present)")
+                    continue
+                add_comment(server, user, token, jira_key,
+                            markdown_to_adf(repo["comment_md"]))
+                print(f"  Added unresolved-repository warning on {jira_key}")
+        except Exception as e:
+            print(f"  ERROR publishing repository info on {jira_key}: {e}",
+                  file=sys.stderr)
+            errors += 1
+    return errors
+
+
 def _submit_strategy(server, user, token, strat_id, plan, dry_run,
                      artifacts_dir="artifacts"):
     """Execute all submission phases for one strategy.
@@ -579,6 +679,11 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
         print("  [DRY RUN] Would create:")
         for entry in pending:
             print(f"    - {entry['epic_id']}: {entry['title'][:60]}")
+            repo = entry.get("repository")
+            if repo:
+                target = repo["url"] if repo["status"] == "resolved" else \
+                    "unresolved (empty field + warning comment)"
+                print(f"        repository: {target}")
         print("  [DRY RUN] Would attach frontmatter to each epic")
         print(f"  [DRY RUN] Would label {strat_id} with {STRAT_LABEL}")
         return len(pending), 0
@@ -603,6 +708,11 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
                     "Review the existing epics instead of submitting a fresh "
                     "breakdown. To resume a partial submission, use its original "
                     "artifacts with the recorded jira_key values.")
+        repo_fields = {e["repository"]["field_id"] for e in plan
+                       if e.get("repository")}
+        if not failure:
+            for field_id in repo_fields:
+                _check_repository_field(server, user, token, field_id)
     except (JiraReadError, OSError, ValueError, http.client.HTTPException) as e:
         failure = safe_error_message(e)
     if failure:
@@ -635,6 +745,12 @@ def _submit_strategy(server, user, token, strat_id, plan, dry_run,
     print("  Phase 3: Attaching frontmatter metadata...")
     errors += _attach_frontmatter(
         server, user, token, plan, id_to_jira_key)
+
+    # Phase 3b: Repository evidence / unresolved warnings (repository mode)
+    if any(e.get("repository") for e in plan):
+        print("  Phase 3b: Publishing repository evidence...")
+        errors += _publish_repository_info(
+            server, user, token, plan, id_to_jira_key)
 
     # Phase 4: Attach conditional branch plans to investigation epics
     print("  Phase 4: Attaching branch plans...")
@@ -678,6 +794,14 @@ def main():
               "required.", file=sys.stderr)
         print("Set these or use --dry-run for local-only validation.",
               file=sys.stderr)
+        sys.exit(1)
+
+    # Repository mode (ADR-0176): read the flag before anything else.
+    from repository_resolution import FlagError, repository_mode
+    try:
+        repo_mode = repository_mode()
+    except FlagError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     # Load canonical component list for validation
@@ -728,6 +852,15 @@ def main():
 
         # Build submission plan
         plan = _build_plan(epics, valid_components)
+        if repo_mode:
+            problem = _attach_repositories(strat_id, epics, plan)
+            if problem:
+                print(f"  ERROR: Submission blocked for {strat_id}: {problem}",
+                      file=sys.stderr)
+                print(f"  No Jira writes were made for {strat_id}.",
+                      file=sys.stderr)
+                total_errors += 1
+                continue
         _print_plan(plan, strat_id, args.dry_run)
 
         # Execute submission

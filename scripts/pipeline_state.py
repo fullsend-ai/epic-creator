@@ -52,7 +52,7 @@ _BlockDumper.add_representer(str, _str_representer)
 # ---------- Phase enum ----------
 
 PHASES = [
-    "BATCH_START", "FETCH", "DECOMPOSE", "REVIEW_DECOMP",
+    "BATCH_START", "FETCH", "RESOLVE_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP",
     "REVISE_DECOMP",
     "RE_REVIEW_CHECK", "RE_REVIEW", "REVISE_CHECK", "RE_REVISE",
     "BATCH_DONE", "ERROR_COLLECT",
@@ -60,6 +60,14 @@ PHASES = [
 ]
 
 # ---------- Phase config ----------
+
+# Extra agent variables passed only when repository mode is on (ADR-0176).
+REPOSITORY_VARS = {
+    "REPOSITORY_MODE": "true",
+    "SKILL_DIR": "skills/repository-resolution",
+    "MANIFEST": "tmp/repo-resolution/sources/manifest.json",
+    "RESOLUTION": "artifacts/repo-resolution/{ID}-result.json",
+}
 
 PHASE_CONFIG = {
     "BATCH_START": {"type": "noop"},
@@ -70,12 +78,28 @@ PHASE_CONFIG = {
         "poll_phase": "fetch",
         "vars": {"ID": "{ID}"},
     },
+    # Only reached when EPIC_CREATOR_REPOSITORY_MODE=true (ADR-0176).
+    "RESOLVE_REPOSITORIES": {
+        "type": "agent",
+        "prompt": "skills/epic-decompose/prompts/resolve-agent.md",
+        "ids_file": "tmp/pipeline-active-ids.txt",
+        "poll_phase": "resolve",
+        "pre_script": "python3 scripts/repository_resolution.py prepare {ID}",
+        "vars": {
+            "ID": "{ID}",
+            "SKILL_DIR": "skills/repository-resolution",
+            "MANIFEST": "tmp/repo-resolution/sources/manifest.json",
+            "REQUEST": "artifacts/repo-resolution/{ID}-request.json",
+            "RESULT": "artifacts/repo-resolution/{ID}-result.json",
+        },
+    },
     "DECOMPOSE": {
         "type": "agent",
         "prompt": "skills/epic-decompose/prompts/decompose-agent.md",
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "decompose",
         "vars": {"ID": "{ID}"},
+        "repository_vars": REPOSITORY_VARS,
     },
     "REVIEW_DECOMP": {
         "type": "agent",
@@ -83,6 +107,7 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "review_decomp",
         "vars": {"ID": "{ID}"},
+        "repository_vars": REPOSITORY_VARS,
     },
     "REVISE_DECOMP": {
         "type": "agent",
@@ -90,6 +115,7 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise_decomp",
         "vars": {"ID": "{ID}"},
+        "repository_vars": REPOSITORY_VARS,
     },
     "RE_REVIEW_CHECK": {"type": "noop"},
     "RE_REVIEW": {
@@ -98,6 +124,7 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "review_decomp",
         "vars": {"ID": "{ID}"},
+        "repository_vars": REPOSITORY_VARS,
     },
     "REVISE_CHECK": {"type": "noop"},
     "RE_REVISE": {
@@ -106,6 +133,7 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise_decomp",
         "vars": {"ID": "{ID}"},
+        "repository_vars": REPOSITORY_VARS,
     },
 
     # --- Batch control + retry ---
@@ -204,6 +232,38 @@ def _compute_ai_scores(ids_file):
 # ---------- Transition logic ----------
 
 MAIN_SEQUENCE = ["FETCH", "DECOMPOSE", "REVIEW_DECOMP"]
+REPOSITORY_SEQUENCE = ["FETCH", "RESOLVE_REPOSITORIES", "DECOMPOSE", "REVIEW_DECOMP"]
+
+
+def _main_sequence(state):
+    return REPOSITORY_SEQUENCE if state.get("repository_mode") else MAIN_SEQUENCE
+
+
+def _verify_resolutions(dry_run):
+    """Verify every active strategy's resolution before decomposition.
+
+    "A check only binds if it runs" (ADR-0176): the pipeline, not the
+    resolver, decides whether a result is accepted. Strategies whose result
+    fails verification are dropped from this batch; BATCH_DONE then sees no
+    decomposition for them and the retry cycle re-resolves them.
+    """
+    ids = _read_ids("tmp/pipeline-active-ids.txt")
+    if dry_run:
+        return f"verify {len(ids)} resolutions"
+    from repository_resolution import verify_strategy
+    try:
+        records = [verify_strategy(strat_id) for strat_id in ids]
+    except Exception as e:
+        print(f"Repository resolution verification failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    invalid = [r["strat_id"] for r in records if not r["verified"]]
+    for record in records:
+        for error in record["errors"]:
+            print(f"  {record['strat_id']}: {error}", file=sys.stderr)
+    if invalid:
+        _write_ids("tmp/pipeline-active-ids.txt",
+                   [i for i in ids if i not in invalid])
+    return f"verified={len(ids) - len(invalid)} invalid={len(invalid)}"
 
 
 def advance(state, dry_run=False):
@@ -223,10 +283,13 @@ def advance(state, dry_run=False):
         return "FETCH", f"BATCH_START → FETCH: batch={batch}"
 
     # --- Linear main sequence ---
-    if phase in MAIN_SEQUENCE[:-1]:
-        nxt = MAIN_SEQUENCE[MAIN_SEQUENCE.index(phase) + 1]
+    sequence = _main_sequence(state)
+    if phase in sequence[:-1]:
+        nxt = sequence[sequence.index(phase) + 1]
         if phase == "DECOMPOSE" and not dry_run:
             _compute_ai_scores("tmp/pipeline-active-ids.txt")
+        if phase == "RESOLVE_REPOSITORIES":
+            return nxt, f"{phase} → {nxt}: {_verify_resolutions(dry_run)}"
         return nxt, f"{phase} → {nxt}"
 
     # --- REVIEW_DECOMP → REVISE_DECOMP (skip IDs with a clean pass) ---
@@ -405,6 +468,28 @@ def cmd_init(args):
     parser.add_argument("--announce-complete", action="store_true")
     opts = parser.parse_args(args)
 
+    # Feature flag (ADR-0176). Off: resolver.yaml is never read. On: the
+    # declared sources are validated and loaded now (or reused when the
+    # host pre-script already loaded them), so a broken config or an
+    # unfetchable source stops the run before any work starts.
+    from repository_resolution import FlagError, ensure_sources, repository_mode
+    try:
+        repo_mode = repository_mode()
+    except FlagError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    manifest = None
+    if repo_mode:
+        from sources import SourceError
+        try:
+            manifest = ensure_sources()
+        except SourceError as e:
+            print(f"ERROR [{e.kind}]: repository resolution sources: {e}",
+                  file=sys.stderr)
+            print("Stop the run and report it. This is a configuration or "
+                  "source failure.", file=sys.stderr)
+            sys.exit(1)
+
     os.makedirs("tmp", exist_ok=True)
     for f in glob.glob("tmp/pipeline-batch-*-ids.txt"):
         os.remove(f)
@@ -420,9 +505,13 @@ def cmd_init(args):
         "start_time": datetime.now(timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"),
         "retry_cycle": 0,
+        "repository_mode": repo_mode,
     }
+    if manifest:
+        state["resolution_manifest"] = manifest
     _save_state(state)
-    print(f"Initialized pipeline state: batch_size={opts.batch_size}")
+    print(f"Initialized pipeline state: batch_size={opts.batch_size}"
+          f" repository_mode={'on' if repo_mode else 'off'}")
 
 
 def cmd_get_phase(args):
@@ -600,7 +689,10 @@ def cmd_next_action(args):
                     entry["subagent_type"] = config["subagent_type"]
                 entry["prompt_file"] = config["prompt"]
                 var_lines = []
-                for k, v in config.get("vars", {}).items():
+                agent_vars = dict(config.get("vars", {}))
+                if state.get("repository_mode"):
+                    agent_vars.update(config.get("repository_vars", {}))
+                for k, v in agent_vars.items():
                     var_lines.append(
                         f"{k}={v.replace('{ID}', strat_id)}")
                 entry["vars"] = "\n".join(var_lines) + "\n"

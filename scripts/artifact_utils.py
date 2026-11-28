@@ -50,6 +50,11 @@ SCHEMAS = {
             "required": False,
             "default": [],
         },
+        "components": {
+            "type": "list",
+            "required": False,
+            "default": [],
+        },
         "links": {
             "type": "list",
             "required": False,
@@ -157,6 +162,21 @@ SCHEMAS = {
             "type": "string",
             "required": False,
             "pattern": r"^[A-Z][A-Z0-9_]*-\d+$",
+            "default": None,
+        },
+        # Repository mode (ADR-0176). `repository_key` is a key from a
+        # verified resolution result, or null for an unresolved epic;
+        # `repository_resolution` is the path of the result file that holds
+        # the evidence (or the unresolved reason and candidates).
+        "repository_key": {
+            "type": "string",
+            "required": False,
+            "default": None,
+        },
+        "repository_resolution": {
+            "type": "string",
+            "required": False,
+            "pattern": r"^artifacts/repo-resolution/RHAISTRAT-\d+(-E\d{3})?-result\.json$",
             "default": None,
         },
         "branch": {
